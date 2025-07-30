@@ -29,7 +29,7 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaInitializationGuide: React.FC<SchemaInitializationGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Gemini POS - Full Database Setup v8 (Conversion Management)
+-- Danum POS - Full Database Setup v8 (Conversion Management)
 -- This script is idempotent and can be run multiple times safely.
 -- It adds a new 'manage_conversions' permission and functions for managing unit conversions.
 

@@ -214,7 +214,7 @@ const Header: React.FC<HeaderProps> = ({ onLogout, currentView, onNavigate, sess
     <header className="flex justify-between items-center pb-4 border-b border-gray-700">
       <div className="flex items-center gap-6">
         <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-text-primary">Gemini POS</h1>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-text-primary">Danum POS</h1>
         </div>
         
         {/* Desktop Navigation */}

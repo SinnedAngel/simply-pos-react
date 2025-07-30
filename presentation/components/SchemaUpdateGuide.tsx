@@ -29,7 +29,7 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Gemini POS - Database Migration Script v7 to v8 (Conversion Management)
+-- Danum POS - Database Migration Script v7 to v8 (Conversion Management)
 -- This script safely migrates your schema to add management functions for unit conversions.
 -- It will NOT delete any of your existing products, users, or other data.
 

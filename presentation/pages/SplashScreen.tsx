@@ -32,7 +32,7 @@ interface SplashScreenProps {
 const SplashScreen: React.FC<SplashScreenProps> = ({ steps }) => {
   return (
     <div className="fixed inset-0 bg-surface-main flex flex-col justify-center items-center z-50 animate-fade-in text-center">
-        <h1 className="text-5xl font-bold text-text-primary animate-title-pulse">Gemini POS</h1>
+        <h1 className="text-5xl font-bold text-text-primary animate-title-pulse">Danum POS</h1>
         <div className="mt-8 w-full max-w-sm">
           <ul className="space-y-4">
             {steps.map((step, index) => (
