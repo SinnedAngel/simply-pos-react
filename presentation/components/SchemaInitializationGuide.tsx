@@ -78,7 +78,36 @@ CREATE OR REPLACE FUNCTION public.set_product_categories(p_product_id bigint, p_
 CREATE OR REPLACE FUNCTION public.update_category_name(p_old_name text, p_new_name text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN UPDATE public.categories SET name = p_new_name WHERE name = p_old_name; END; $$;
 DROP FUNCTION IF EXISTS public.merge_categories(text, text);
 CREATE OR REPLACE FUNCTION public.merge_categories(p_source_category_name text, p_destination_category_name text) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE v_source_id int; v_destination_id int; BEGIN SELECT id INTO v_source_id FROM public.categories WHERE name = p_source_category_name; SELECT id INTO v_destination_id FROM public.categories WHERE name = p_destination_category_name; IF v_source_id IS NULL OR v_destination_id IS NULL THEN RAISE EXCEPTION 'Invalid category name provided.'; END IF; IF v_source_id = v_destination_id THEN RAISE EXCEPTION 'Cannot merge a category into itself.'; END IF; UPDATE public.product_categories SET category_id = v_destination_id WHERE category_id = v_source_id AND product_id NOT IN (SELECT product_id FROM public.product_categories WHERE category_id = v_destination_id); DELETE FROM public.product_categories WHERE category_id = v_source_id; DELETE FROM public.categories WHERE id = v_source_id; END; $$;
-CREATE OR REPLACE FUNCTION public.seed_initial_products(products_data jsonb) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE product_item jsonb; BEGIN TRUNCATE public.products, public.categories, public.product_categories, public.ingredients, public.unit_conversions, public.product_ingredients RESTART IDENTITY CASCADE; FOREACH product_item IN SELECT * FROM jsonb_array_elements(products_data) LOOP INSERT INTO public.products(id, name, price, image_url) VALUES ((product_item->>'id')::bigint, product_item->>'name', (product_item->>'price')::numeric, product_item->>'imageUrl'); PERFORM public.set_product_categories((product_item->>'id')::bigint, (SELECT array_agg(value) FROM jsonb_array_elements_text(product_item->'categories'))); END LOOP; END; $$;
+CREATE OR REPLACE FUNCTION public.seed_initial_products(products_data jsonb)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER AS $$
+DECLARE
+    product_item jsonb;
+    v_category_names text[];
+BEGIN
+    TRUNCATE public.products, public.categories, public.product_categories, public.ingredients, public.unit_conversions, public.product_ingredients RESTART IDENTITY CASCADE;
+    
+    FOR product_item IN SELECT * FROM jsonb_array_elements(products_data)
+    LOOP
+        INSERT INTO public.products(id, name, price, image_url)
+        VALUES (
+            (product_item->>'id')::bigint,
+            product_item->>'name',
+            (product_item->>'price')::numeric,
+            product_item->>'imageUrl'
+        );
+        
+        SELECT array_agg(value) INTO v_category_names
+        FROM jsonb_array_elements_text(product_item->'categories');
+        
+        PERFORM public.set_product_categories(
+            (product_item->>'id')::bigint,
+            v_category_names
+        );
+    END LOOP;
+END;
+$$;
 
 DROP FUNCTION IF EXISTS public.get_all_ingredients();
 CREATE OR REPLACE FUNCTION public.get_all_ingredients() RETURNS TABLE(id bigint, name text, stock_level numeric, stock_unit text) LANGUAGE sql STABLE SECURITY DEFINER AS $$ SELECT i.id, i.name, i.stock_level, i.stock_unit FROM public.ingredients i ORDER BY i.name; $$;
