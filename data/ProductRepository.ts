@@ -71,14 +71,14 @@ export class ProductRepository implements IProductRepository {
 
   async updateProduct(product: Product): Promise<Product> {
     // 1. Update the product details in the 'products' table.
-    const productUpdate: Database['public']['Tables']['products']['Update'] = {
+    const productUpdate = {
         name: product.name,
         price: product.price,
         image_url: product.imageUrl,
     };
     const { data, error: productError } = await this.supabase
       .from('products')
-      .update(productUpdate)
+      .update(productUpdate as any)
       .eq('id', product.id)
       .select()
       .single();
@@ -131,10 +131,10 @@ export class ProductRepository implements IProductRepository {
       throw new Error(`Could not determine new product ID: ${maxIdError.message}`);
     }
 
-    const newId = (maxIdData?.id ?? 0) + 1;
+    const newId = ((maxIdData as any)?.id ?? 0) + 1;
 
     // 1. Insert the new product into the 'products' table.
-    const newProductRecord: Database['public']['Tables']['products']['Insert'] = {
+    const newProductRecord = {
       id: newId,
       name: productData.name,
       price: productData.price,
@@ -143,7 +143,7 @@ export class ProductRepository implements IProductRepository {
 
     const { error: insertError } = await this.supabase
       .from('products')
-      .insert(newProductRecord);
+      .insert(newProductRecord as any);
 
     if (insertError) {
       console.error('Error creating product:', insertError);

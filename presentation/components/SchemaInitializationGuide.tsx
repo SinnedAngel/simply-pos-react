@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface SchemaInitializationGuideProps {
@@ -29,9 +28,9 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaInitializationGuide: React.FC<SchemaInitializationGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Full Database Setup v8 (Conversion Management)
+-- Gemini POS - Full Database Setup v10 (Order Log)
 -- This script is idempotent and can be run multiple times safely.
--- It adds a new 'manage_conversions' permission and functions for managing unit conversions.
+-- It adds a user_id to orders to track who made the sale.
 
 -- Section 1: Core Tables (Users, Roles)
 CREATE TABLE IF NOT EXISTS public.roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL UNIQUE);
@@ -47,7 +46,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS public.products (id bigint PRIMARY KEY, name text NOT NULL, price numeric NOT NULL, image_url text NOT NULL);
 CREATE TABLE IF NOT EXISTS public.categories (id serial PRIMARY KEY, name text NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS public.product_categories (product_id bigint NOT NULL REFERENCES public.products(id) ON DELETE CASCADE, category_id integer NOT NULL REFERENCES public.categories(id) ON DELETE CASCADE, PRIMARY KEY (product_id, category_id));
-CREATE TABLE IF NOT EXISTS public.orders (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), created_at timestamptz NOT NULL DEFAULT now(), total numeric NOT NULL);
+CREATE TABLE IF NOT EXISTS public.orders (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), created_at timestamptz NOT NULL DEFAULT now(), total numeric NOT NULL, user_id uuid NULL REFERENCES public.users(id));
 CREATE TABLE IF NOT EXISTS public.order_items (id bigserial PRIMARY KEY, order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE, product_id bigint NOT NULL REFERENCES public.products(id), quantity integer NOT NULL, price numeric NOT NULL);
 CREATE TABLE IF NOT EXISTS public.ingredients (id bigserial PRIMARY KEY, name text NOT NULL UNIQUE, stock_level numeric NOT NULL DEFAULT 0, stock_unit text NOT NULL);
 CREATE TABLE IF NOT EXISTS public.unit_conversions (id bigserial PRIMARY KEY, from_unit text NOT NULL, to_unit text NOT NULL, factor numeric NOT NULL, ingredient_id bigint NULL REFERENCES public.ingredients(id) ON DELETE CASCADE, UNIQUE(from_unit, to_unit, ingredient_id));
@@ -122,8 +121,10 @@ CREATE OR REPLACE FUNCTION public.set_product_recipe(p_product_id bigint, p_reci
 
 -- Section 4: Sales, Seeding & Conversion Functions
 CREATE OR REPLACE FUNCTION public.get_conversion_factor(p_from_unit text, p_to_unit text, p_ingredient_id bigint) RETURNS numeric LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE v_factor numeric; v_inverse_factor numeric; BEGIN IF p_from_unit = p_to_unit THEN RETURN 1.0; END IF; SELECT factor INTO v_factor FROM public.unit_conversions WHERE from_unit = p_from_unit AND to_unit = p_to_unit AND (ingredient_id = p_ingredient_id OR (ingredient_id IS NULL AND p_ingredient_id IS NOT NULL)) ORDER BY ingredient_id DESC NULLS LAST LIMIT 1; IF v_factor IS NOT NULL THEN RETURN v_factor; END IF; SELECT factor INTO v_inverse_factor FROM public.unit_conversions WHERE from_unit = p_to_unit AND to_unit = p_from_unit AND (ingredient_id = p_ingredient_id OR (ingredient_id IS NULL AND p_ingredient_id IS NOT NULL)) ORDER BY ingredient_id DESC NULLS LAST LIMIT 1; IF v_inverse_factor IS NOT NULL THEN RETURN 1.0 / v_inverse_factor; END IF; RAISE EXCEPTION 'Unit conversion from % to % not found for ingredient ID %', p_from_unit, p_to_unit, p_ingredient_id; RETURN NULL; END; $$;
-CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE v_order_id uuid; order_item jsonb; recipe_item record; v_stock_unit text; v_conversion_factor numeric; v_deduction_amount numeric; BEGIN INSERT INTO public.orders (total) VALUES (p_total) RETURNING id INTO v_order_id; FOR order_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP INSERT INTO public.order_items (order_id, product_id, quantity, price) VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric); FOR recipe_item IN SELECT pi.ingredient_id, pi.quantity AS recipe_quantity, pi.unit AS recipe_unit FROM public.product_ingredients pi WHERE pi.product_id = (order_item->>'product_id')::bigint LOOP SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id; v_conversion_factor := public.get_conversion_factor(recipe_item.recipe_unit, v_stock_unit, recipe_item.ingredient_id); v_deduction_amount := recipe_item.recipe_quantity * v_conversion_factor * (order_item->>'quantity')::numeric; UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id; END LOOP; END LOOP; END; $$;
+DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb);
+CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE v_order_id uuid; order_item jsonb; recipe_item record; v_stock_unit text; v_conversion_factor numeric; v_deduction_amount numeric; BEGIN INSERT INTO public.orders (total, user_id) VALUES (p_total, p_user_id) RETURNING id INTO v_order_id; FOR order_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP INSERT INTO public.order_items (order_id, product_id, quantity, price) VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric); FOR recipe_item IN SELECT pi.ingredient_id, pi.quantity AS recipe_quantity, pi.unit AS recipe_unit FROM public.product_ingredients pi WHERE pi.product_id = (order_item->>'product_id')::bigint LOOP SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id; v_conversion_factor := public.get_conversion_factor(recipe_item.recipe_unit, v_stock_unit, recipe_item.ingredient_id); v_deduction_amount := recipe_item.recipe_quantity * v_conversion_factor * (order_item->>'quantity')::numeric; UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id; END LOOP; END LOOP; END; $$;
 CREATE OR REPLACE FUNCTION public.get_sales_report(p_start_date date, p_end_date date) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE report jsonb; BEGIN SELECT jsonb_build_object('totalRevenue', COALESCE(SUM(o.total), 0), 'orderCount', COUNT(o.id), 'avgOrderValue', COALESCE(AVG(o.total), 0), 'dailySales', (SELECT COALESCE(jsonb_agg(ds), '[]'::jsonb) FROM (SELECT DATE(o2.created_at) AS date, SUM(o2.total) AS total FROM public.orders o2 WHERE o2.created_at >= p_start_date AND o2.created_at < p_end_date + interval '1 day' GROUP BY DATE(o2.created_at) ORDER BY date) ds), 'topProducts', (SELECT COALESCE(jsonb_agg(tp), '[]'::jsonb) FROM (SELECT p.name AS name, p.price AS price, SUM(oi.quantity) AS quantity FROM public.order_items oi JOIN public.products p ON oi.product_id = p.id JOIN public.orders o3 ON oi.order_id = o3.id WHERE o3.created_at >= p_start_date AND o3.created_at < p_end_date + interval '1 day' GROUP BY p.name, p.price ORDER BY quantity DESC LIMIT 10) tp)) INTO report FROM public.orders o WHERE o.created_at >= p_start_date AND o.created_at < p_end_date + interval '1 day'; RETURN report; END; $$;
+CREATE OR REPLACE FUNCTION public.get_order_log(p_start_date date, p_end_date date) RETURNS TABLE(order_id uuid, created_at timestamptz, total numeric, cashier_username text, items jsonb) LANGUAGE sql STABLE SECURITY DEFINER AS $$ SELECT o.id as order_id, o.created_at, o.total, u.username as cashier_username, COALESCE((SELECT jsonb_agg(jsonb_build_object('productName', p.name, 'quantity', oi.quantity, 'price', oi.price) ORDER BY p.name) FROM public.order_items oi JOIN public.products p ON oi.product_id = p.id WHERE oi.order_id = o.id), '[]'::jsonb) as items FROM public.orders o LEFT JOIN public.users u ON o.user_id = u.id WHERE o.created_at >= p_start_date AND o.created_at < p_end_date + interval '1 day' ORDER BY o.created_at DESC; $$;
 CREATE OR REPLACE FUNCTION public.seed_inventory_and_recipes() RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ DECLARE v_espresso_id bigint; v_cappuccino_id bigint; v_iced_latte_id bigint; v_croissant_id bigint; v_sugar_id bigint; v_coffee_beans_id bigint; v_milk_id bigint; v_croissant_dough_id bigint; BEGIN TRUNCATE public.ingredients, public.unit_conversions, public.product_ingredients RESTART IDENTITY CASCADE; INSERT INTO public.ingredients (name, stock_level, stock_unit) VALUES ('Coffee Beans', 1000, 'gram'), ('Sugar', 5000, 'gram'), ('Milk', 10000, 'ml'), ('Croissant Dough', 50, 'pcs'), ('Cinnamon Filling', 2000, 'gram'), ('Sourdough Bread', 100, 'slice'), ('Avocado', 30, 'pcs'), ('Green Tea Leaves', 500, 'gram'), ('Black Tea Leaves', 500, 'gram'), ('Chocolate', 3000, 'gram'), ('Turkey Slices', 200, 'slice'), ('Orange', 50, 'pcs'), ('Muffin Mix', 5000, 'gram'), ('Blueberries', 1000, 'gram') ON CONFLICT (name) DO NOTHING; SELECT id INTO v_espresso_id FROM public.products WHERE name = 'Espresso'; SELECT id INTO v_cappuccino_id FROM public.products WHERE name = 'Cappuccino'; SELECT id INTO v_iced_latte_id FROM public.products WHERE name = 'Iced Latte'; SELECT id INTO v_croissant_id FROM public.products WHERE name = 'Croissant'; SELECT id INTO v_sugar_id FROM public.ingredients WHERE name = 'Sugar'; SELECT id INTO v_coffee_beans_id FROM public.ingredients WHERE name = 'Coffee Beans'; SELECT id INTO v_milk_id FROM public.ingredients WHERE name = 'Milk'; SELECT id INTO v_croissant_dough_id FROM public.ingredients WHERE name = 'Croissant Dough'; INSERT INTO public.unit_conversions (from_unit, to_unit, factor, ingredient_id) VALUES ('teaspoon', 'gram', 4.2, v_sugar_id), ('tablespoon', 'gram', 12.5, v_sugar_id), ('kilogram', 'gram', 1000, NULL), ('liter', 'ml', 1000, NULL) ON CONFLICT DO NOTHING; IF v_espresso_id IS NOT NULL AND v_coffee_beans_id IS NOT NULL THEN INSERT INTO public.product_ingredients (product_id, ingredient_id, quantity, unit) VALUES (v_espresso_id, v_coffee_beans_id, 7, 'gram'); END IF; IF v_cappuccino_id IS NOT NULL AND v_coffee_beans_id IS NOT NULL AND v_milk_id IS NOT NULL THEN INSERT INTO public.product_ingredients (product_id, ingredient_id, quantity, unit) VALUES (v_cappuccino_id, v_coffee_beans_id, 7, 'gram'), (v_cappuccino_id, v_milk_id, 100, 'ml'); END IF; IF v_iced_latte_id IS NOT NULL AND v_coffee_beans_id IS NOT NULL AND v_milk_id IS NOT NULL THEN INSERT INTO public.product_ingredients (product_id, ingredient_id, quantity, unit) VALUES (v_iced_latte_id, v_coffee_beans_id, 14, 'gram'), (v_iced_latte_id, v_milk_id, 150, 'ml'); END IF; IF v_croissant_id IS NOT NULL AND v_croissant_dough_id IS NOT NULL THEN INSERT INTO public.product_ingredients (product_id, ingredient_id, quantity, unit) VALUES (v_croissant_id, v_croissant_dough_id, 1, 'pcs'); END IF; END; $$;
 DROP FUNCTION IF EXISTS public.get_all_conversions();
 CREATE OR REPLACE FUNCTION public.get_all_conversions()
@@ -187,10 +188,14 @@ BEGIN
     (admin_role_id, 'manage_menu'), (admin_role_id, 'manage_categories'), 
     (admin_role_id, 'manage_media'), (admin_role_id, 'manage_accounts'), 
     (admin_role_id, 'manage_roles'), (admin_role_id, 'view_reports'),
-    (admin_role_id, 'manage_inventory'), (admin_role_id, 'manage_conversions')
+    (admin_role_id, 'manage_inventory'), (admin_role_id, 'manage_conversions'),
+    (admin_role_id, 'create_sales')
   ON CONFLICT DO NOTHING;
   DELETE FROM public.role_permissions WHERE role_id = cashier_role_id;
-  INSERT INTO public.role_permissions (role_id, permission) VALUES (cashier_role_id, 'manage_media') ON CONFLICT DO NOTHING;
+  INSERT INTO public.role_permissions (role_id, permission) VALUES
+    (cashier_role_id, 'manage_media'),
+    (cashier_role_id, 'create_sales')
+  ON CONFLICT DO NOTHING;
 END;
 $$;
 
@@ -233,8 +238,7 @@ CREATE POLICY "Allow anonymous access to product images" ON storage.objects FOR 
 
 -- Section 9. Schema Versioning
 CREATE TABLE IF NOT EXISTS public.schema_migrations (version bigint PRIMARY KEY, migrated_at timestamptz DEFAULT now() NOT NULL);
-DELETE FROM public.schema_migrations;
-INSERT INTO public.schema_migrations (version) VALUES (8) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
+INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -267,7 +271,7 @@ INSERT INTO public.schema_migrations (version) VALUES (8) ON CONFLICT (version) 
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Setup Script (v8)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Setup Script (v10)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

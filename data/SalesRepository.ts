@@ -1,8 +1,7 @@
-
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database, OrderItemParam, RpcSaleReport } from '../types';
+import { Database, OrderItemParam, RpcOrderLogItem, RpcSaleReport } from '../types';
 import { ISalesRepository } from '../domain/ports';
-import { Order, SaleReport } from '../domain/entities';
+import { Order, OrderLogItem, SaleReport } from '../domain/entities';
 
 // --- ADAPTER: Sales Repository ---
 // This class implements the ISalesRepository port. It adapts our data source (Supabase)
@@ -10,7 +9,7 @@ import { Order, SaleReport } from '../domain/entities';
 export class SalesRepository implements ISalesRepository {
   constructor(private supabase: SupabaseClient<Database>) {}
 
-  async createOrder(order: Order): Promise<void> {
+  async createOrder(order: Order, userId: string): Promise<void> {
     const itemsToStore: OrderItemParam[] = order.items.map(item => ({
         product_id: item.id,
         quantity: item.quantity,
@@ -20,6 +19,7 @@ export class SalesRepository implements ISalesRepository {
     const { error } = await this.supabase.rpc('create_order', {
       p_total: order.total,
       p_items: itemsToStore,
+      p_user_id: userId,
     });
 
     if (error) {
@@ -61,5 +61,33 @@ export class SalesRepository implements ISalesRepository {
         dailySales: reportData.dailySales || [],
         topProducts: reportData.topProducts || [],
     };
+  }
+
+  async getOrderLog(startDate: string, endDate: string): Promise<OrderLogItem[]> {
+    const { data, error } = await this.supabase.rpc('get_order_log', {
+        p_start_date: startDate,
+        p_end_date: endDate,
+    });
+    
+    if (error) {
+        console.error("Error fetching order log:", error);
+        throw new Error(`Failed to fetch order log: ${error.message}`);
+    }
+
+    if (!data) return [];
+
+    const logData = data as unknown as RpcOrderLogItem[];
+
+    return logData.map(item => ({
+        orderId: item.order_id,
+        createdAt: item.created_at,
+        total: item.total,
+        cashierUsername: item.cashier_username,
+        items: item.items.map(p => ({
+            productName: p.productName,
+            quantity: p.quantity,
+            price: p.price,
+        })),
+    }));
   }
 }

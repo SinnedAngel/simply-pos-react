@@ -1,10 +1,9 @@
-
 import React, { useState } from 'react';
 import { SalesUseCases } from '../../domain/use-cases';
 import { useReporting } from '../hooks/useReporting';
 import LoadingSpinner from '../components/LoadingSpinner';
 import SalesChart from '../components/SalesChart';
-import { RangePayload } from '../hooks/useReporting';
+import { OrderLogItem } from '../../domain/entities';
 
 
 interface ReportingPageProps {
@@ -26,8 +25,53 @@ const toDateInputString = (date: Date): string => {
     return `${year}-${month}-${day}`;
 };
 
+const OrderLogTable: React.FC<{ log: OrderLogItem[] | null }> = ({ log }) => {
+    if (!log || log.length === 0) {
+        return (
+            <div className="h-64 flex items-center justify-center">
+                <p className="text-text-secondary">No orders found in this period.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="overflow-x-auto max-h-[500px]">
+            <table className="w-full text-left min-w-[600px]">
+                <thead className="bg-surface-main sticky top-0 z-10">
+                    <tr>
+                        <th className="p-3 font-semibold text-sm">Time</th>
+                        <th className="p-3 font-semibold text-sm">Cashier</th>
+                        <th className="p-3 font-semibold text-sm">Items</th>
+                        <th className="p-3 font-semibold text-sm text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {log.map(order => (
+                        <tr key={order.orderId} className="border-b border-surface-main last:border-b-0 hover:bg-surface-main/50 transition-colors">
+                            <td className="p-3 text-sm text-text-secondary whitespace-nowrap">
+                                {new Date(order.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                            </td>
+                            <td className="p-3 text-sm text-text-primary">{order.cashierUsername || <span className="italic text-text-secondary">N/A</span>}</td>
+                            <td className="p-3 text-sm text-text-secondary">
+                                <ul className="space-y-1">
+                                    {order.items.map((item, index) => (
+                                        <li key={index}>{item.quantity}x {item.productName}</li>
+                                    ))}
+                                </ul>
+                            </td>
+                            <td className="p-3 text-sm font-semibold text-text-primary text-right whitespace-nowrap">
+                                Rp {order.total.toLocaleString('id-ID')}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
 const ReportingPage: React.FC<ReportingPageProps> = ({ useCases }) => {
-    const { report, isLoading, error, fetchReport, activeFilter } = useReporting(useCases);
+    const { report, orderLog, isLoading, error, fetchReport, activeFilter } = useReporting(useCases);
     const [startDate, setStartDate] = useState(toDateInputString(new Date()));
     const [endDate, setEndDate] = useState(toDateInputString(new Date()));
     const [customDateError, setCustomDateError] = useState('');
@@ -98,6 +142,12 @@ const ReportingPage: React.FC<ReportingPageProps> = ({ useCases }) => {
                                 <p className="text-text-secondary text-sm">No products sold in this period.</p>
                             </div>
                          )}
+                    </div>
+
+                    {/* New Order Log section */}
+                    <div className="bg-surface-card rounded-xl p-6 shadow-lg lg:col-span-3">
+                        <h3 className="text-lg font-semibold text-text-primary mb-4">Order Log</h3>
+                        <OrderLogTable log={orderLog} />
                     </div>
                 </div>
             </div>

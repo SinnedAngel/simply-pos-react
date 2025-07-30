@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface SchemaUpdateGuideProps {
@@ -29,73 +28,87 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Database Migration Script v7 to v8 (Conversion Management)
--- This script safely migrates your schema to add management functions for unit conversions.
--- It will NOT delete any of your existing products, users, or other data.
+-- Danum POS - Database Migration Script v9 to v10 (Order Log)
+-- This script adds a user_id to orders and functions to view an order log by cashier.
 
--- Section 1: Add New Permission for Conversion Management
-DO $$
-DECLARE admin_role_id uuid;
+-- Section 1: Add user_id column to orders table
+-- It's nullable to support orders created before this update.
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id uuid NULL REFERENCES public.users(id);
+
+-- Section 2: Update create_order function to include user_id
+DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb);
+CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER AS $$
+DECLARE
+    v_order_id uuid;
+    order_item jsonb;
+    recipe_item record;
+    v_stock_unit text;
+    v_conversion_factor numeric;
+    v_deduction_amount numeric;
 BEGIN
-  -- Add the new permission and assign it to the 'admin' role
-  SELECT id INTO admin_role_id FROM public.roles WHERE name = 'admin';
-  IF admin_role_id IS NOT NULL THEN
-    INSERT INTO public.role_permissions (role_id, permission)
-    VALUES (admin_role_id, 'manage_conversions')
-    ON CONFLICT (role_id, permission) DO NOTHING;
-  END IF;
+    INSERT INTO public.orders (total, user_id) VALUES (p_total, p_user_id) RETURNING id INTO v_order_id;
+    FOR order_item IN SELECT * FROM jsonb_array_elements(p_items)
+    LOOP
+        INSERT INTO public.order_items (order_id, product_id, quantity, price)
+        VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric);
+
+        FOR recipe_item IN
+            SELECT pi.ingredient_id, pi.quantity AS recipe_quantity, pi.unit AS recipe_unit
+            FROM public.product_ingredients pi
+            WHERE pi.product_id = (order_item->>'product_id')::bigint
+        LOOP
+            SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id;
+            v_conversion_factor := public.get_conversion_factor(recipe_item.recipe_unit, v_stock_unit, recipe_item.ingredient_id);
+            v_deduction_amount := recipe_item.recipe_quantity * v_conversion_factor * (order_item->>'quantity')::numeric;
+            UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id;
+        END LOOP;
+    END LOOP;
 END;
 $$;
 
 
--- Section 2: Create New Functions for Managing Conversions
-DROP FUNCTION IF EXISTS public.get_all_conversions();
-CREATE OR REPLACE FUNCTION public.get_all_conversions()
-RETURNS TABLE(id bigint, from_unit text, to_unit text, factor numeric, ingredient_id bigint, ingredient_name text)
+-- Section 3: Add new function to get order log with cashier details
+CREATE OR REPLACE FUNCTION public.get_order_log(p_start_date date, p_end_date date)
+RETURNS TABLE(
+    order_id uuid,
+    created_at timestamptz,
+    total numeric,
+    cashier_username text,
+    items jsonb
+)
 LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT uc.id, uc.from_unit, uc.to_unit, uc.factor, uc.ingredient_id, i.name as ingredient_name
-  FROM public.unit_conversions uc
-  LEFT JOIN public.ingredients i ON uc.ingredient_id = i.id
-  ORDER BY i.name, uc.from_unit;
+  SELECT
+    o.id as order_id,
+    o.created_at,
+    o.total,
+    u.username as cashier_username,
+    COALESCE(
+      (
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'productName', p.name,
+            'quantity', oi.quantity,
+            'price', oi.price
+          ) ORDER BY p.name
+        )
+        FROM public.order_items oi
+        JOIN public.products p ON oi.product_id = p.id
+        WHERE oi.order_id = o.id
+      ),
+      '[]'::jsonb
+    ) as items
+  FROM public.orders o
+  LEFT JOIN public.users u ON o.user_id = u.id
+  WHERE o.created_at >= p_start_date AND o.created_at < p_end_date + interval '1 day'
+  ORDER BY o.created_at DESC;
 $$;
-
-DROP FUNCTION IF EXISTS public.create_conversion(text,text,numeric,bigint);
-CREATE OR REPLACE FUNCTION public.create_conversion(p_from_unit text, p_to_unit text, p_factor numeric, p_ingredient_id bigint DEFAULT NULL)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  INSERT INTO public.unit_conversions (from_unit, to_unit, factor, ingredient_id)
-  VALUES (p_from_unit, p_to_unit, p_factor, p_ingredient_id);
-END;
-$$;
-
-DROP FUNCTION IF EXISTS public.update_conversion(bigint,text,text,numeric,bigint);
-CREATE OR REPLACE FUNCTION public.update_conversion(p_id bigint, p_from_unit text, p_to_unit text, p_factor numeric, p_ingredient_id bigint DEFAULT NULL)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  UPDATE public.unit_conversions
-  SET from_unit = p_from_unit, to_unit = p_to_unit, factor = p_factor, ingredient_id = p_ingredient_id
-  WHERE id = p_id;
-END;
-$$;
-
-DROP FUNCTION IF EXISTS public.delete_conversion(bigint);
-CREATE OR REPLACE FUNCTION public.delete_conversion(p_id bigint)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  DELETE FROM public.unit_conversions WHERE id = p_id;
-END;
-$$;
-
--- Section 3: Grant execute on new functions
-GRANT EXECUTE ON FUNCTION public.get_all_conversions() TO anon, service_role;
-GRANT EXECUTE ON FUNCTION public.create_conversion(text,text,numeric,bigint) TO anon, service_role;
-GRANT EXECUTE ON FUNCTION public.update_conversion(bigint,text,text,numeric,bigint) TO anon, service_role;
-GRANT EXECUTE ON FUNCTION public.delete_conversion(bigint) TO anon, service_role;
 
 
 -- Section 4: Schema Versioning
--- Update version to 8
-INSERT INTO public.schema_migrations (version) VALUES (8) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
+INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -131,7 +144,7 @@ INSERT INTO public.schema_migrations (version) VALUES (8) ON CONFLICT (version) 
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v7 to v8)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v9 to v10)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

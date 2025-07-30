@@ -13,6 +13,7 @@ import { ChevronDownIcon } from '../components/icons/ChevronDownIcon';
 
 const ALL_PERMISSIONS = [
     { id: 'view_reports', label: 'View Reports', description: 'Can view the sales and performance reports page.' },
+    { id: 'create_sales', label: 'Create Sales', description: 'Can process orders and perform checkout.' },
     { id: 'manage_menu', label: 'Manage Menu', description: 'Can add, edit, and delete products from the menu.' },
     { id: 'manage_categories', label: 'Manage Categories', description: 'Can rename and merge product categories.' },
     { id: 'manage_media', label: 'Manage Media', description: 'Can upload and delete images in the media library.' },

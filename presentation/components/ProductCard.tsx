@@ -9,9 +9,10 @@ interface ProductCardProps {
   onSelect: (product: Product) => void;
   onEdit: (product: Product) => void;
   canEdit: boolean;
+  canAddToOrder: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, onEdit, canEdit }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, onEdit, canEdit, canAddToOrder }) => {
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevents the onSelect handler from being called
     onEdit(product);
@@ -19,8 +20,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, onEdit, ca
   
   return (
     <div
-      onClick={() => onSelect(product)}
-      className="bg-surface-card rounded-lg shadow-lg overflow-hidden cursor-pointer group transition-all duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-2xl hover:shadow-brand-accent/10 relative"
+      onClick={canAddToOrder ? () => onSelect(product) : undefined}
+      className={`
+        bg-surface-card rounded-lg shadow-lg overflow-hidden group relative
+        transition-all duration-300 ease-in-out
+        cursor-pointer transform hover:-translate-y-1 hover:shadow-2xl hover:shadow-brand-accent/10
+      `}
+      title={!canAddToOrder ? "You do not have permission to add items to an order." : product.name}
     >
       {canEdit && (
          <button

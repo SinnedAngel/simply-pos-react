@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useProducts } from './hooks/useProducts';
 import { useOrder } from './hooks/useOrder';
@@ -91,9 +90,18 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
 
   const handleCheckout = async () => {
     if (order.items.length === 0) return;
+    
+    // Add a permission check here as a safeguard.
+    if (!session?.permissions.includes('create_sales') || !session.id) {
+      const err = new Error("You do not have permission or are not properly signed in to perform this action.");
+      setCheckoutMessage({ type: 'error', text: err.message });
+      setTimeout(() => setCheckoutMessage(null), 5000);
+      throw err; // For OrderSummary loading state
+    }
+
     const orderTotal = order.total;
     try {
-        await salesUseCases.createOrder(order);
+        await salesUseCases.createOrder(order, session.id);
         clearOrder();
         setCheckoutMessage({ type: 'success', text: `Checkout successful! Total: Rp ${orderTotal.toLocaleString('id-ID')}`});
         setIsOrderSummaryVisible(false); // Close mobile modal on success
@@ -149,6 +157,7 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
     }
 
     const canEditProducts = session?.permissions.includes('manage_menu') ?? false;
+    const canCreateSales = session?.permissions.includes('create_sales') ?? false;
 
     return (
       <ProductGrid
@@ -157,6 +166,7 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
         onProductSelect={addItem}
         onEditProduct={setEditingProduct}
         canEditProducts={canEditProducts}
+        canAddToOrder={canCreateSales}
       />
     );
   };
@@ -186,12 +196,15 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
     }
   };
 
+  const canCreateSales = session?.permissions.includes('create_sales') ?? false;
+
   const orderSummaryComponent = (
     <OrderSummary
         order={order}
         onRemoveItem={removeItem}
         onUpdateQuantity={updateItemQuantity}
         onCheckout={handleCheckout}
+        canCheckout={canCreateSales}
     />
   );
 

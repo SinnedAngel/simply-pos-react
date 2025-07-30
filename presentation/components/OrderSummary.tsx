@@ -10,9 +10,10 @@ interface OrderSummaryProps {
   onRemoveItem: (productId: number) => void;
   onUpdateQuantity: (productId: number, newQuantity: number) => void;
   onCheckout: () => Promise<void>;
+  canCheckout: boolean;
 }
 
-const OrderSummary: React.FC<OrderSummaryProps> = ({ order, onRemoveItem, onUpdateQuantity, onCheckout }) => {
+const OrderSummary: React.FC<OrderSummaryProps> = ({ order, onRemoveItem, onUpdateQuantity, onCheckout, canCheckout }) => {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const handleCheckout = async () => {
@@ -66,8 +67,9 @@ const OrderSummary: React.FC<OrderSummaryProps> = ({ order, onRemoveItem, onUpda
         </div>
         <button
           onClick={handleCheckout}
-          disabled={order.items.length === 0 || isCheckingOut}
+          disabled={order.items.length === 0 || isCheckingOut || !canCheckout}
           className="w-full mt-6 py-3 bg-brand-primary hover:bg-brand-secondary text-white font-bold rounded-lg transition-colors duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center gap-2"
+          title={!canCheckout ? "You do not have permission to perform sales." : undefined}
         >
           {isCheckingOut && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>}
           {isCheckingOut ? 'Processing...' : 'Checkout'}

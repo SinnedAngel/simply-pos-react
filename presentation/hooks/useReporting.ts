@@ -1,6 +1,5 @@
-
 import { useState, useEffect, useCallback } from 'react';
-import { SaleReport } from '../../domain/entities';
+import { OrderLogItem, SaleReport } from '../../domain/entities';
 import { SalesUseCases } from '../../domain/use-cases';
 
 type PresetRange = 'today' | '7d' | '30d';
@@ -9,6 +8,7 @@ export type RangePayload = PresetRange | { startDate: string; endDate: string };
 
 export const useReporting = (useCases: SalesUseCases) => {
   const [report, setReport] = useState<SaleReport | null>(null);
+  const [orderLog, setOrderLog] = useState<OrderLogItem[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('7d');
@@ -59,8 +59,12 @@ export const useReporting = (useCases: SalesUseCases) => {
         dates = payload;
       }
       
-      const fetchedReport = await useCases.getSalesReport(dates.startDate, dates.endDate);
+      const [fetchedReport, fetchedLog] = await Promise.all([
+          useCases.getSalesReport(dates.startDate, dates.endDate),
+          useCases.getOrderLog(dates.startDate, dates.endDate),
+      ]);
       setReport(fetchedReport);
+      setOrderLog(fetchedLog);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching the report.');
     } finally {
@@ -76,5 +80,5 @@ export const useReporting = (useCases: SalesUseCases) => {
   }, []);
 
 
-  return { report, isLoading, error, activeFilter, fetchReport };
+  return { report, orderLog, isLoading, error, activeFilter, fetchReport };
 };

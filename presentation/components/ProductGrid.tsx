@@ -9,9 +9,10 @@ interface ProductGridProps {
   onProductSelect: (product: Product) => void;
   onEditProduct: (product: Product) => void;
   canEditProducts: boolean;
+  canAddToOrder: boolean;
 }
 
-const ProductGrid: React.FC<ProductGridProps> = ({ products, categories, onProductSelect, onEditProduct, canEditProducts }) => {
+const ProductGrid: React.FC<ProductGridProps> = ({ products, categories, onProductSelect, onEditProduct, canEditProducts, canAddToOrder }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   
   const filteredProducts = selectedCategory === 'All' 
@@ -43,6 +44,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({ products, categories, onProdu
             onSelect={onProductSelect}
             onEdit={onEditProduct}
             canEdit={canEditProducts}
+            canAddToOrder={canAddToOrder}
           />
         ))}
       </div>

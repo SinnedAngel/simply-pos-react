@@ -40,7 +40,7 @@ export class IngredientRepository implements IIngredientRepository {
     // We need to fetch the created ingredient to get its ID
     const { data: newIngredient, error: fetchError } = await this.supabase
         .from('ingredients')
-        .select('*')
+        .select('id, name, stock_level, stock_unit')
         .eq('name', name)
         .single();
     

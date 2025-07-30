@@ -1,4 +1,3 @@
-
 // --- DOMAIN ENTITIES ---
 // These are the core data structures of the application, representing the business objects.
 // They have no dependencies and are used throughout the application.
@@ -70,6 +69,20 @@ export interface UnitConversion {
 }
 
 // --- Reporting Entities ---
+
+export interface OrderLogItemProduct {
+  productName: string;
+  quantity: number;
+  price: number;
+}
+
+export interface OrderLogItem {
+  orderId: string;
+  createdAt: string;
+  total: number;
+  cashierUsername: string | null;
+  items: OrderLogItemProduct[];
+}
 
 export interface DailySale {
   date: string;

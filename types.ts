@@ -1,4 +1,3 @@
-
 // A standard type for JSON data, which is missing and causes compilation errors.
 export type Json =
   | string
@@ -69,6 +68,22 @@ export type RpcSaleReport = {
   avgOrderValue: number;
   dailySales: { date: string; total: number }[];
   topProducts: { name: string; quantity: number; price: number }[];
+};
+
+// Type for order items returned by the order log RPC
+export type RpcOrderLogItemProduct = {
+  productName: string;
+  quantity: number;
+  price: number;
+};
+
+// Type for the result of the 'get_order_log' RPC
+export type RpcOrderLogItem = {
+  order_id: string;
+  created_at: string;
+  total: number;
+  cashier_username: string | null;
+  items: RpcOrderLogItemProduct[];
 };
 
 
@@ -224,18 +239,28 @@ export interface Database {
           id: string;
           created_at: string;
           total: number;
+          user_id: string | null;
         };
         Insert: {
           id?: string;
           created_at?: string;
           total: number;
+          user_id?: string | null;
         };
         Update: {
           id?: string;
           created_at?: string;
           total?: number;
+          user_id?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "orders_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       order_items: {
         Row: {
@@ -387,7 +412,7 @@ export interface Database {
       };
       get_products_with_categories: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcProduct[];
       };
       set_product_categories: {
         Args: {
@@ -491,6 +516,7 @@ export interface Database {
         Args: {
           p_total: number;
           p_items: OrderItemParam[];
+          p_user_id: string;
         };
         Returns: void;
       };
@@ -499,12 +525,19 @@ export interface Database {
           p_start_date: string;
           p_end_date: string;
         };
-        Returns: any;
+        Returns: RpcSaleReport;
+      };
+      get_order_log: {
+        Args: {
+          p_start_date: string;
+          p_end_date: string;
+        };
+        Returns: RpcOrderLogItem[];
       };
       // Inventory & Conversion Functions
       get_all_ingredients: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcIngredient[];
       };
       create_ingredient: {
         Args: {
@@ -542,7 +575,7 @@ export interface Database {
       };
       get_all_conversions: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcConversion[];
       };
       create_conversion: {
         Args: {
