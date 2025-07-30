@@ -1,0 +1,308 @@
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Product, StoredImage, Ingredient, RecipeItem } from '../../domain/entities';
+import { MediaUseCases, InventoryUseCases } from '../../domain/use-cases';
+import { useMediaLibrary } from '../hooks/useMediaLibrary';
+import LoadingSpinner from './LoadingSpinner';
+import { UploadIcon } from './icons/UploadIcon';
+import { PlusIcon } from './icons/PlusIcon';
+import { TrashIcon } from './icons/TrashIcon';
+
+interface EditProductModalProps {
+  product: Product | 'new' | null;
+  mediaUseCases: MediaUseCases;
+  inventoryUseCases: InventoryUseCases;
+  categories: string[];
+  onSave: (product: Product | Omit<Product, 'id' | 'categories'> & { categories: string[], recipe: RecipeItem[] }) => Promise<void>;
+  onCancel: () => void;
+}
+
+type MobileTab = 'details' | 'recipe' | 'image';
+
+const CategoryCheckbox: React.FC<{
+    category: string;
+    isChecked: boolean;
+    onChange: (category: string, checked: boolean) => void;
+    disabled: boolean;
+}> = ({ category, isChecked, onChange, disabled }) => (
+    <label className="flex items-center gap-2 p-2 rounded-md hover:bg-surface-main/50 transition-colors">
+        <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={(e) => onChange(category, e.target.checked)}
+            disabled={disabled}
+            className="h-4 w-4 rounded border-gray-500 bg-surface-main text-brand-secondary focus:ring-brand-secondary"
+        />
+        <span className="text-text-primary">{category}</span>
+    </label>
+);
+
+
+const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCases, inventoryUseCases, categories, onSave, onCancel }) => {
+  const isNew = product === 'new';
+  const productData = isNew ? null : product;
+
+  // Form State
+  const [name, setName] = useState(productData?.name ?? '');
+  const [price, setPrice] = useState(productData?.price ?? 0);
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set(productData?.categories ?? []));
+  const [selectedImageUrl, setSelectedImageUrl] = useState(productData?.imageUrl ?? '');
+  const [recipe, setRecipe] = useState<RecipeItem[]>(productData?.recipe ?? []);
+  
+  // Modal/Interaction State
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<MobileTab>('details');
+
+  // Media Library State
+  const { images, isLoading: isLoadingMedia, error: mediaError, uploadImages, isUploading: isUploadingMedia } = useMediaLibrary(mediaUseCases);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Ingredient State
+  const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
+  const [isLoadingIngredients, setIsLoadingIngredients] = useState(true);
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  
+  useEffect(() => {
+    const fetchIngredients = async () => {
+        try {
+            const fetched = await inventoryUseCases.getIngredients();
+            setAllIngredients(fetched);
+        } catch (e) {
+            setError('Could not load ingredients list.');
+        } finally {
+            setIsLoadingIngredients(false);
+        }
+    }
+    fetchIngredients();
+  }, [inventoryUseCases]);
+
+
+  const handleCategoryChange = (category: string, isChecked: boolean) => {
+    setSelectedCategories(prev => {
+        const newSet = new Set(prev);
+        if (isChecked) newSet.add(category);
+        else newSet.delete(category);
+        return newSet;
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setError('');
+      try {
+        const newImages: StoredImage[] = await uploadImages(files);
+        if (newImages.length > 0) setSelectedImageUrl(newImages[0].url);
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : 'Upload failed.');
+      }
+    }
+    if(fileInputRef.current) fileInputRef.current.value = "";
+  };
+  
+  const handleAddIngredientToRecipe = (ingredient: Ingredient) => {
+    if (recipe.some(item => item.ingredientId === ingredient.id)) return;
+    
+    setRecipe(prev => [...prev, {
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        quantity: 1, // Default quantity
+        unit: ingredient.stockUnit, // Default to the ingredient's stock unit
+    }]);
+    setIngredientSearch('');
+  };
+
+  const handleUpdateRecipeItem = (ingredientId: number, field: 'quantity' | 'unit', value: string | number) => {
+    setRecipe(prev => prev.map(item => {
+        if (item.ingredientId === ingredientId) {
+            if (field === 'quantity') {
+                const n = parseFloat(String(value));
+                 return { ...item, quantity: isNaN(n) || n < 0 ? item.quantity : n };
+            }
+            if(field === 'unit') {
+                return { ...item, unit: String(value) };
+            }
+        }
+        return item;
+    }));
+  };
+  
+  const handleRemoveRecipeItem = (ingredientId: number) => {
+    setRecipe(prev => prev.filter(item => item.ingredientId !== ingredientId));
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Product name is required.'); return; }
+    if (selectedCategories.size === 0) { setError('At least one category must be selected.'); return; }
+    if (isNaN(price) || price <= 0) { setError('Price must be a positive number.'); return; }
+    if (!selectedImageUrl) { setError('You must select an image for the product.'); return; }
+    
+    setError('');
+    setIsSaving(true);
+    
+    const saveData = { name, price, categories: Array.from(selectedCategories), imageUrl: selectedImageUrl, recipe };
+
+    try {
+        if (isNew) {
+            await onSave(saveData);
+        } else {
+            await onSave({ ...saveData, id: productData!.id });
+        }
+    } catch (e) {
+        setError(e instanceof Error ? e.message : 'An unknown error occurred during save.');
+        setIsSaving(false);
+    }
+  };
+  
+  const filteredIngredients = useMemo(() => {
+    if (!ingredientSearch) return [];
+    return allIngredients.filter(ing => 
+        ing.name.toLowerCase().includes(ingredientSearch.toLowerCase()) &&
+        !recipe.some(r => r.ingredientId === ing.id) // Exclude already added ingredients
+    ).slice(0, 5);
+  }, [ingredientSearch, allIngredients, recipe]);
+  
+  const TabButton: React.FC<{tab: MobileTab, children: React.ReactNode}> = ({ tab, children }) => (
+    <button 
+        onClick={() => setActiveTab(tab)}
+        className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-colors ${activeTab === tab ? 'border-brand-secondary text-text-primary' : 'border-transparent text-text-secondary'}`}
+    >
+        {children}
+    </button>
+  );
+
+  const FormDetails = (
+     <div className="space-y-4">
+        <div>
+            <label htmlFor="product-name" className="block text-sm font-medium text-text-secondary mb-2">Product Name</label>
+            <input id="product-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., Iced Latte" />
+        </div>
+        <div>
+            <label htmlFor="product-price" className="block text-sm font-medium text-text-secondary mb-2">Price</label>
+            <input id="product-price" type="number" value={price} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., 25000"/>
+        </div>
+        <div>
+            <label className="block text-sm font-medium text-text-secondary mb-2">Categories</label>
+            <div className="w-full max-h-40 overflow-y-auto bg-surface-main rounded-md p-2 border border-gray-600 grid grid-cols-2 gap-1">
+                {categories.length > 0 ? categories.map(cat => <CategoryCheckbox key={cat} category={cat} isChecked={selectedCategories.has(cat)} onChange={handleCategoryChange} disabled={false} />) : <p className="text-text-secondary text-sm p-2 col-span-2 text-center">No categories exist.</p>}
+            </div>
+        </div>
+     </div>
+  );
+  
+  const FormRecipe = (
+    <div className="flex flex-col gap-2">
+        <label className="block text-sm font-medium text-text-secondary">Recipe Ingredients</label>
+        <div className="relative">
+            <input type="text" placeholder="Search to add ingredients..." value={ingredientSearch} onChange={e => setIngredientSearch(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
+            {filteredIngredients.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-surface-sidebar border border-gray-600 rounded-md shadow-lg z-10">
+                    {filteredIngredients.map(ing => (
+                        <button key={ing.id} onClick={() => handleAddIngredientToRecipe(ing)} className="w-full text-left px-4 py-2 hover:bg-surface-main">
+                            {ing.name} <span className="text-text-secondary text-xs">({ing.stockUnit})</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+        <div className="w-full min-h-[100px] max-h-48 overflow-y-auto bg-surface-main rounded-md p-2 border border-gray-600 space-y-2">
+            {recipe.length > 0 ? recipe.map(item => (
+                <div key={item.ingredientId} className="flex items-center justify-between gap-2 bg-surface-sidebar p-2 rounded">
+                    <span className="text-text-primary flex-1 truncate">{item.ingredientName}</span>
+                    <div className="flex items-center gap-1">
+                        <input type="number" value={item.quantity} onChange={e => handleUpdateRecipeItem(item.ingredientId, 'quantity', e.target.value)} className="w-16 px-2 py-1 bg-surface-main border border-gray-600 rounded-md text-right"/>
+                        <input type="text" value={item.unit} onChange={e => handleUpdateRecipeItem(item.ingredientId, 'unit', e.target.value)} className="w-20 px-2 py-1 bg-surface-main border border-gray-600 rounded-md" placeholder="unit"/>
+                    </div>
+                    <button onClick={() => handleRemoveRecipeItem(item.ingredientId)} className="p-1 text-red-500 hover:text-red-400"><TrashIcon className="w-4 h-4"/></button>
+                </div>
+            )) : <p className="text-text-secondary text-sm text-center p-4">No ingredients in recipe.</p>}
+        </div>
+    </div>
+  );
+
+  const FormImage = (
+    <div className="flex flex-col h-full">
+        <h3 className="text-lg font-semibold text-text-primary mb-2 hidden sm:block">Product Image</h3>
+        <div className="w-full h-48 rounded-md bg-surface-main flex items-center justify-center mb-4">
+            {selectedImageUrl ? <img src={selectedImageUrl} alt="Selected product" className="w-full h-full object-cover rounded-md" /> : <p className="text-text-secondary">Select an image</p>}
+        </div>
+        <div className="flex justify-between items-center mb-2">
+            <h3 className="text-md font-semibold text-text-secondary">Choose from Library</h3>
+            <button onClick={() => fileInputRef.current?.click()} disabled={isUploadingMedia} className="flex items-center gap-2 px-3 py-1.5 text-sm bg-brand-primary hover:bg-brand-secondary text-white font-semibold rounded-lg transition-colors duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed">
+            {isUploadingMedia ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Uploading...</> : <><UploadIcon className="w-4 h-4" />Upload New</>}
+            </button>
+        </div>
+        <div className="flex-grow bg-surface-main rounded-md p-3 overflow-y-auto">
+            {isLoadingMedia && <LoadingSpinner message="Loading images..." />}
+            {mediaError && !error && <p className="text-red-400">{mediaError}</p>}
+            {!isLoadingMedia && !mediaError && (
+                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                    {images.map(image => (
+                        <button key={image.name} onClick={() => setSelectedImageUrl(image.url)} className={`rounded-md overflow-hidden border-2 transition-colors ${selectedImageUrl === image.url ? 'border-brand-secondary' : 'border-transparent hover:border-brand-accent'}`}>
+                            <img src={image.url} alt={image.name} className="w-full h-24 object-cover" />
+                        </button>
+                    ))}
+                </div>
+            )}
+            {!isLoadingMedia && images.length === 0 && <p className="text-text-secondary text-center p-4">No images in library.</p>}
+        </div>
+    </div>
+  );
+
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex justify-center items-center animate-fade-in">
+      <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          hidden
+          multiple
+          accept="image/png, image/jpeg, image/gif, image/webp"
+      />
+      <div className="bg-surface-card shadow-2xl flex flex-col w-full h-full sm:rounded-xl sm:w-full sm:max-w-6xl sm:h-[90vh]">
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-700">
+            <h2 className="text-2xl font-bold text-text-primary">{isNew ? 'Add New Product' : 'Edit Product'}</h2>
+            <div className="flex justify-end space-x-4">
+                <button onClick={onCancel} disabled={isSaving || isUploadingMedia} className="px-6 py-2 rounded-md bg-gray-600 hover:bg-gray-500 text-text-primary font-semibold transition-colors disabled:opacity-50 hidden sm:block">Cancel</button>
+                <button onClick={handleSave} disabled={isSaving || isUploadingMedia} className="px-6 py-2 rounded-md bg-brand-primary hover:bg-brand-secondary text-white font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                    {isSaving && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
+                    {isSaving ? 'Saving...' : 'Save'}
+                </button>
+                 <button onClick={onCancel} className="px-2 py-2 rounded-md text-text-secondary font-semibold transition-colors disabled:opacity-50 sm:hidden">Close</button>
+            </div>
+        </div>
+
+        {/* Mobile Tabs */}
+        <div className="sm:hidden flex border-b border-gray-700">
+            <TabButton tab="details">Details</TabButton>
+            <TabButton tab="recipe">Recipe</TabButton>
+            <TabButton tab="image">Image</TabButton>
+        </div>
+
+        {/* Content */}
+        <div className="flex-grow p-4 sm:p-6 overflow-hidden">
+            <div className="h-full overflow-y-auto">
+                {/* Desktop Layout */}
+                <div className="hidden sm:grid sm:grid-cols-1 lg:grid-cols-2 gap-x-8 h-full">
+                    <div className="space-y-6 overflow-y-auto pr-4">{FormDetails}{FormRecipe}</div>
+                    <div className="overflow-y-auto">{FormImage}</div>
+                </div>
+                {/* Mobile Layout */}
+                <div className="sm:hidden h-full">
+                    {activeTab === 'details' && FormDetails}
+                    {activeTab === 'recipe' && FormRecipe}
+                    {activeTab === 'image' && <div className="h-full">{FormImage}</div>}
+                </div>
+            </div>
+        </div>
+
+        {error && <p className="text-red-500 text-sm text-center p-2 bg-red-900/40">{error}</p>}
+      </div>
+    </div>
+  );
+};
+
+export default EditProductModal;

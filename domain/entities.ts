@@ -1,0 +1,91 @@
+
+// --- DOMAIN ENTITIES ---
+// These are the core data structures of the application, representing the business objects.
+// They have no dependencies and are used throughout the application.
+
+export interface Ingredient {
+  id: number;
+  name: string;
+  stockLevel: number;
+  stockUnit: string;
+}
+
+export interface RecipeItem {
+  ingredientId: number;
+  ingredientName: string; // denormalized for easier display
+  quantity: number;
+  unit: string; 
+}
+
+export interface Product {
+  id: number;
+  name: string;
+  price: number;
+  imageUrl: string;
+  categories: string[];
+  recipe: RecipeItem[];
+}
+
+export interface OrderItem extends Product {
+  quantity: number;
+}
+
+export interface Order {
+  items: OrderItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+}
+
+export interface UserSession {
+  id: string;
+  username: string;
+  role: string;
+  permissions: string[];
+}
+
+export interface ListedUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+}
+
+export interface StoredImage {
+  name: string;
+  url: string;
+}
+
+export interface UnitConversion {
+  id: number;
+  fromUnit: string;
+  toUnit: string;
+  factor: number;
+  ingredientId: number | null;
+  ingredientName: string | null; // denormalized for display
+}
+
+// --- Reporting Entities ---
+
+export interface DailySale {
+  date: string;
+  total: number;
+}
+
+export interface TopProduct {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+export interface SaleReport {
+  totalRevenue: number;
+  orderCount: number;
+  avgOrderValue: number;
+  dailySales: DailySale[];
+  topProducts: TopProduct[];
+}

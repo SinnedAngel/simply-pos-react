@@ -1,0 +1,6 @@
+{
+  "name": "Gemini POS",
+  "description": "A modern Point of Sale (POS) application for a cafe, built with a clean architecture and powered by Gemini for dynamic daily specials.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

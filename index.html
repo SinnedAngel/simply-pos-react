@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini POS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'brand-primary': '#1E3A8A', // A deep blue
+              'brand-secondary': '#3B82F6', // A vibrant blue
+              'brand-accent': '#60A5FA', // A lighter blue
+              'surface-main': '#111827', // Dark gray, almost black
+              'surface-card': '#1F2937', // Slightly lighter gray for cards
+              'surface-sidebar': '#0F172A', // Darkest blue/gray for the sidebar
+              'text-primary': '#F9FAFB', // Off-white
+              'text-secondary': '#D1D5DB', // Light gray
+              'text-accent': '#93C5FD', // Light blue for accents
+            },
+            animation: {
+              'subtle-pulse': 'subtle-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'fade-in': 'fade-in 0.5s ease-out forwards',
+              'title-pulse': 'title-pulse 2.5s ease-in-out infinite',
+              'fade-in-up': 'fade-in-up 0.6s ease-out forwards',
+            },
+            keyframes: {
+              'subtle-pulse': {
+                '0%, 100%': { opacity: 1 },
+                '50%': { opacity: .85 },
+              },
+              'fade-in': {
+                '0%': { opacity: 0, transform: 'translateY(-10px)' },
+                '100%': { opacity: 1, transform: 'translateY(0)' },
+              },
+              'title-pulse': {
+                '0%, 100%': { transform: 'scale(1)', opacity: .95 },
+                '50%': { transform: 'scale(1.03)', opacity: 1 },
+              },
+              'fade-in-up': {
+                '0%': { opacity: 0, transform: 'translateY(20px)' },
+                '100%': { opacity: 1, transform: 'translateY(0)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-surface-main">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
