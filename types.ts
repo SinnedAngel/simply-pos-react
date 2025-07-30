@@ -9,12 +9,21 @@ export type Json =
 
 // Specific type for recipe items returned by RPC.
 // Defined locally to prevent complex cross-file type resolution issues in the Database type.
-export type RpcRecipeItem = {
-    ingredientId: number;
-    ingredientName: string;
-    quantity: number;
-    unit: string;
-};
+export type RpcRecipeItem =
+  | {
+      type: 'ingredient';
+      ingredientId: number;
+      ingredientName: string;
+      quantity: number;
+      unit: string;
+    }
+  | {
+      type: 'product';
+      productId: number;
+      productName: string;
+      quantity: number;
+      unit: string;
+    };
 
 // Specific type for the result of the 'get_products_with_categories' RPC
 // This avoids using a generic 'Json' type which can cause compiler issues.
@@ -59,6 +68,14 @@ export type OrderItemParam = {
   product_id: number;
   quantity: number;
   price: number;
+};
+
+// Type for the recipe items passed to the 'set_product_recipe' RPC
+export type RpcRecipeParamItem = {
+    ingredientId?: number | null;
+    productId?: number | null;
+    quantity: number;
+    unit: string;
 };
 
 // Type for the entire sales report returned by the 'get_sales_report' RPC
@@ -320,36 +337,48 @@ export interface Database {
         };
         Relationships: [];
       };
-      product_ingredients: {
+      product_recipe_items: {
         Row: {
+            id: number;
             product_id: number;
-            ingredient_id: number;
+            ingredient_id: number | null;
+            sub_product_id: number | null;
             quantity: number;
             unit: string;
         };
         Insert: {
+            id?: number;
             product_id: number;
-            ingredient_id: number;
+            ingredient_id?: number | null;
+            sub_product_id?: number | null;
             quantity: number;
             unit: string;
         };
         Update: {
+            id?: number;
             product_id?: number;
-            ingredient_id?: number;
+            ingredient_id?: number | null;
+            sub_product_id?: number | null;
             quantity?: number;
             unit?: string;
         };
         Relationships: [
              {
-                foreignKeyName: "product_ingredients_product_id_fkey";
+                foreignKeyName: "product_recipe_items_product_id_fkey";
                 columns: ["product_id"];
                 referencedRelation: "products";
                 referencedColumns: ["id"];
             },
             {
-                foreignKeyName: "product_ingredients_ingredient_id_fkey";
+                foreignKeyName: "product_recipe_items_ingredient_id_fkey";
                 columns: ["ingredient_id"];
                 referencedRelation: "ingredients";
+                referencedColumns: ["id"];
+            },
+            {
+                foreignKeyName: "product_recipe_items_sub_product_id_fkey";
+                columns: ["sub_product_id"];
+                referencedRelation: "products";
                 referencedColumns: ["id"];
             }
         ];
@@ -565,7 +594,7 @@ export interface Database {
       set_product_recipe: {
         Args: {
             p_product_id: number;
-            p_recipe: { ingredientId: number, quantity: number, unit: string }[];
+            p_recipe: RpcRecipeParamItem[];
         };
         Returns: void;
       };

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Product, StoredImage, Ingredient, RecipeItem } from '../../domain/entities';
 import { MediaUseCases, InventoryUseCases } from '../../domain/use-cases';
@@ -7,9 +6,12 @@ import LoadingSpinner from './LoadingSpinner';
 import { UploadIcon } from './icons/UploadIcon';
 import { PlusIcon } from './icons/PlusIcon';
 import { TrashIcon } from './icons/TrashIcon';
+import { CubeIcon } from './icons/CubeIcon';
+import { BeakerIcon } from './icons/BeakerIcon';
 
 interface EditProductModalProps {
   product: Product | 'new' | null;
+  allProducts: Product[];
   mediaUseCases: MediaUseCases;
   inventoryUseCases: InventoryUseCases;
   categories: string[];
@@ -38,7 +40,7 @@ const CategoryCheckbox: React.FC<{
 );
 
 
-const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCases, inventoryUseCases, categories, onSave, onCancel }) => {
+const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProducts, mediaUseCases, inventoryUseCases, categories, onSave, onCancel }) => {
   const isNew = product === 'new';
   const productData = isNew ? null : product;
 
@@ -61,7 +63,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
   // Ingredient State
   const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
   const [isLoadingIngredients, setIsLoadingIngredients] = useState(true);
-  const [ingredientSearch, setIngredientSearch] = useState('');
+  const [recipeSearch, setRecipeSearch] = useState('');
   
   useEffect(() => {
     const fetchIngredients = async () => {
@@ -101,21 +103,34 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
   
-  const handleAddIngredientToRecipe = (ingredient: Ingredient) => {
-    if (recipe.some(item => item.ingredientId === ingredient.id)) return;
-    
-    setRecipe(prev => [...prev, {
-        ingredientId: ingredient.id,
-        ingredientName: ingredient.name,
-        quantity: 1, // Default quantity
-        unit: ingredient.stockUnit, // Default to the ingredient's stock unit
-    }]);
-    setIngredientSearch('');
+  const handleAddRecipeItem = (item: Ingredient | Product, type: 'ingredient' | 'product') => {
+    if (type === 'ingredient') {
+        const ingredient = item as Ingredient;
+        if (recipe.some(r => r.type === 'ingredient' && r.ingredientId === ingredient.id)) return;
+        setRecipe(prev => [...prev, {
+            type: 'ingredient',
+            ingredientId: ingredient.id,
+            ingredientName: ingredient.name,
+            quantity: 1,
+            unit: ingredient.stockUnit,
+        }]);
+    } else {
+        const subProduct = item as Product;
+        if (recipe.some(r => r.type === 'product' && r.productId === subProduct.id)) return;
+        setRecipe(prev => [...prev, {
+            type: 'product',
+            productId: subProduct.id,
+            productName: subProduct.name,
+            quantity: 1,
+            unit: 'pcs',
+        }]);
+    }
+    setRecipeSearch('');
   };
 
-  const handleUpdateRecipeItem = (ingredientId: number, field: 'quantity' | 'unit', value: string | number) => {
-    setRecipe(prev => prev.map(item => {
-        if (item.ingredientId === ingredientId) {
+  const handleUpdateRecipeItem = (index: number, field: 'quantity' | 'unit', value: string | number) => {
+    setRecipe(prev => prev.map((item, i) => {
+        if (i === index) {
             if (field === 'quantity') {
                 const n = parseFloat(String(value));
                  return { ...item, quantity: isNaN(n) || n < 0 ? item.quantity : n };
@@ -128,8 +143,8 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
     }));
   };
   
-  const handleRemoveRecipeItem = (ingredientId: number) => {
-    setRecipe(prev => prev.filter(item => item.ingredientId !== ingredientId));
+  const handleRemoveRecipeItem = (index: number) => {
+    setRecipe(prev => prev.filter((_, i) => i !== index));
   }
 
   const handleSave = async () => {
@@ -155,13 +170,26 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
     }
   };
   
-  const filteredIngredients = useMemo(() => {
-    if (!ingredientSearch) return [];
-    return allIngredients.filter(ing => 
-        ing.name.toLowerCase().includes(ingredientSearch.toLowerCase()) &&
-        !recipe.some(r => r.ingredientId === ing.id) // Exclude already added ingredients
-    ).slice(0, 5);
-  }, [ingredientSearch, allIngredients, recipe]);
+  const filteredRecipeComponents = useMemo(() => {
+    if (!recipeSearch) return [];
+    
+    const ingredients = allIngredients
+      .filter(ing => 
+        ing.name.toLowerCase().includes(recipeSearch.toLowerCase()) &&
+        !recipe.some(r => r.type === 'ingredient' && r.ingredientId === ing.id)
+      )
+      .map(ing => ({ ...ing, itemType: 'ingredient' as const }));
+
+    const products = allProducts
+       .filter(p => 
+        p.name.toLowerCase().includes(recipeSearch.toLowerCase()) &&
+        !recipe.some(r => r.type === 'product' && r.productId === p.id) &&
+        (isNew || p.id !== productData!.id) // Prevent adding itself to its own recipe
+      )
+      .map(p => ({ ...p, itemType: 'product' as const }));
+
+    return [...ingredients, ...products].slice(0, 10);
+  }, [recipeSearch, allIngredients, allProducts, recipe, isNew, productData]);
   
   const TabButton: React.FC<{tab: MobileTab, children: React.ReactNode}> = ({ tab, children }) => (
     <button 
@@ -193,30 +221,34 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
   
   const FormRecipe = (
     <div className="flex flex-col gap-2">
-        <label className="block text-sm font-medium text-text-secondary">Recipe Ingredients</label>
+        <label className="block text-sm font-medium text-text-secondary">Recipe Components</label>
         <div className="relative">
-            <input type="text" placeholder="Search to add ingredients..." value={ingredientSearch} onChange={e => setIngredientSearch(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
-            {filteredIngredients.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-surface-sidebar border border-gray-600 rounded-md shadow-lg z-10">
-                    {filteredIngredients.map(ing => (
-                        <button key={ing.id} onClick={() => handleAddIngredientToRecipe(ing)} className="w-full text-left px-4 py-2 hover:bg-surface-main">
-                            {ing.name} <span className="text-text-secondary text-xs">({ing.stockUnit})</span>
+            <input type="text" placeholder="Search to add ingredients or products..." value={recipeSearch} onChange={e => setRecipeSearch(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
+            {filteredRecipeComponents.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-surface-sidebar border border-gray-600 rounded-md shadow-lg z-10 max-h-60 overflow-y-auto">
+                    {filteredRecipeComponents.map(item => (
+                        <button key={`${item.itemType}-${item.id}`} onClick={() => handleAddRecipeItem(item, item.itemType)} className="w-full text-left px-4 py-2 hover:bg-surface-main flex items-center gap-2">
+                            {item.itemType === 'ingredient' ? <BeakerIcon className="w-4 h-4 text-green-400 flex-shrink-0" /> : <CubeIcon className="w-4 h-4 text-blue-400 flex-shrink-0" />}
+                            <span>{item.name}</span>
                         </button>
                     ))}
                 </div>
             )}
         </div>
         <div className="w-full min-h-[100px] max-h-48 overflow-y-auto bg-surface-main rounded-md p-2 border border-gray-600 space-y-2">
-            {recipe.length > 0 ? recipe.map(item => (
-                <div key={item.ingredientId} className="flex items-center justify-between gap-2 bg-surface-sidebar p-2 rounded">
-                    <span className="text-text-primary flex-1 truncate">{item.ingredientName}</span>
-                    <div className="flex items-center gap-1">
-                        <input type="number" value={item.quantity} onChange={e => handleUpdateRecipeItem(item.ingredientId, 'quantity', e.target.value)} className="w-16 px-2 py-1 bg-surface-main border border-gray-600 rounded-md text-right"/>
-                        <input type="text" value={item.unit} onChange={e => handleUpdateRecipeItem(item.ingredientId, 'unit', e.target.value)} className="w-20 px-2 py-1 bg-surface-main border border-gray-600 rounded-md" placeholder="unit"/>
+            {recipe.length > 0 ? recipe.map((item, index) => (
+                <div key={index} className="flex items-center justify-between gap-2 bg-surface-sidebar p-2 rounded">
+                    <div className="flex items-center gap-2 flex-1 truncate">
+                        {item.type === 'ingredient' ? <BeakerIcon className="w-4 h-4 text-green-400 flex-shrink-0" /> : <CubeIcon className="w-4 h-4 text-blue-400 flex-shrink-0" />}
+                        <span className="text-text-primary truncate">{item.type === 'ingredient' ? item.ingredientName : item.productName}</span>
                     </div>
-                    <button onClick={() => handleRemoveRecipeItem(item.ingredientId)} className="p-1 text-red-500 hover:text-red-400"><TrashIcon className="w-4 h-4"/></button>
+                    <div className="flex items-center gap-1">
+                        <input type="number" value={item.quantity} onChange={e => handleUpdateRecipeItem(index, 'quantity', e.target.value)} className="w-16 px-2 py-1 bg-surface-main border border-gray-600 rounded-md text-right"/>
+                        <input type="text" value={item.unit} onChange={e => handleUpdateRecipeItem(index, 'unit', e.target.value)} className="w-20 px-2 py-1 bg-surface-main border border-gray-600 rounded-md" placeholder="unit"/>
+                    </div>
+                    <button onClick={() => handleRemoveRecipeItem(index)} className="p-1 text-red-500 hover:text-red-400"><TrashIcon className="w-4 h-4"/></button>
                 </div>
-            )) : <p className="text-text-secondary text-sm text-center p-4">No ingredients in recipe.</p>}
+            )) : <p className="text-text-secondary text-sm text-center p-4">No components in recipe.</p>}
         </div>
     </div>
   );
@@ -288,7 +320,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
                 {/* Desktop Layout */}
                 <div className="hidden sm:grid sm:grid-cols-1 lg:grid-cols-2 gap-x-8 h-full">
                     <div className="space-y-6 overflow-y-auto pr-4">{FormDetails}{FormRecipe}</div>
-                    <div className="overflow-y-auto">{FormImage}</div>
+                    <div className="overflow-y-auto flex flex-col">{FormImage}</div>
                 </div>
                 {/* Mobile Layout */}
                 <div className="sm:hidden h-full">
@@ -304,5 +336,25 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, mediaUseCa
     </div>
   );
 };
+
+// A new icon for ingredients
+const BeakerIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M4.5 3h15"></path>
+    <path d="M6 3v16a2 2 0 002 2h8a2 2 0 002-1V3"></path>
+    <path d="M6 14h12"></path>
+  </svg>
+);
 
 export default EditProductModal;

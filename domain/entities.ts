@@ -9,12 +9,23 @@ export interface Ingredient {
   stockUnit: string;
 }
 
-export interface RecipeItem {
+export interface IngredientRecipeItem {
+  type: 'ingredient';
   ingredientId: number;
-  ingredientName: string; // denormalized for easier display
+  ingredientName: string;
   quantity: number;
-  unit: string; 
+  unit: string;
 }
+
+export interface ProductRecipeItem {
+  type: 'product';
+  productId: number;
+  productName: string;
+  quantity: number;
+  unit: string;
+}
+
+export type RecipeItem = IngredientRecipeItem | ProductRecipeItem;
 
 export interface Product {
   id: number;

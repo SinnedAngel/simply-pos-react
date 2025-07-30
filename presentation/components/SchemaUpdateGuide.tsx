@@ -29,115 +29,143 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Database Migration Script v10 to v11 (Multi-step Conversions)
--- This script updates the unit conversion function to support multi-step paths.
+-- Danum POS - Database Migration Script v11 to v12 (Intermediary Products)
+-- This non-destructive script updates your schema to support multi-level recipes.
 
--- Section 1: Replace the unit conversion function with a more robust version
-DROP FUNCTION IF EXISTS public.get_conversion_factor(text, text, bigint);
-CREATE OR REPLACE FUNCTION public.get_conversion_factor(p_from_unit text, p_to_unit text, p_ingredient_id bigint)
-RETURNS numeric
-LANGUAGE plpgsql
-SECURITY DEFINER AS $$
-DECLARE
-    v_factor numeric;
+-- Section 1: Modify recipe table to support products as ingredients
+DO $$
 BEGIN
-    IF p_from_unit = p_to_unit THEN
-        RETURN 1.0;
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'product_ingredients') THEN
+        ALTER TABLE public.product_ingredients RENAME TO product_recipe_items;
+        ALTER TABLE public.product_recipe_items RENAME CONSTRAINT product_ingredients_pkey TO product_recipe_items_pkey;
+        ALTER TABLE public.product_recipe_items DROP CONSTRAINT product_recipe_items_pkey;
+        ALTER TABLE public.product_recipe_items ADD COLUMN id BIGSERIAL PRIMARY KEY;
+        ALTER TABLE public.product_recipe_items ADD COLUMN sub_product_id BIGINT NULL REFERENCES public.products(id) ON DELETE CASCADE;
+        ALTER TABLE public.product_recipe_items ALTER COLUMN ingredient_id DROP NOT NULL;
+        ALTER TABLE public.product_recipe_items ADD CONSTRAINT one_recipe_item_type_check CHECK ((ingredient_id IS NOT NULL AND sub_product_id IS NULL) OR (ingredient_id IS NULL AND sub_product_id IS NOT NULL));
+        ALTER TABLE public.product_recipe_items ADD CONSTRAINT unique_ingredient_per_product UNIQUE (product_id, ingredient_id);
+        ALTER TABLE public.product_recipe_items ADD CONSTRAINT unique_subproduct_per_product UNIQUE (product_id, sub_product_id);
     END IF;
-
-    WITH RECURSIVE all_possible_edges AS (
-        -- Get all applicable conversions, both direct and inverse
-        SELECT from_unit, to_unit, factor, ingredient_id FROM public.unit_conversions WHERE ingredient_id = p_ingredient_id OR ingredient_id IS NULL
-        UNION ALL
-        SELECT to_unit as from_unit, from_unit as to_unit, 1.0/factor as factor, ingredient_id FROM public.unit_conversions WHERE ingredient_id = p_ingredient_id OR ingredient_id IS NULL
-    ),
-    distinct_edges AS (
-        -- For each from/to pair, pick the most specific conversion (ingredient-specific wins over generic)
-        SELECT DISTINCT ON (from_unit, to_unit) from_unit, to_unit, factor
-        FROM all_possible_edges
-        ORDER BY from_unit, to_unit, ingredient_id DESC NULLS LAST
-    ),
-    conversion_path AS (
-        -- Base case: start from the source unit
-        SELECT
-            p_from_unit as end_unit,
-            1.0::numeric as total_factor,
-            ARRAY[p_from_unit] as path_array,
-            1 as depth
-        UNION ALL
-        -- Recursive step: explore next conversions
-        SELECT
-            de.to_unit as end_unit,
-            cp.total_factor * de.factor,
-            cp.path_array || de.to_unit,
-            cp.depth + 1
-        FROM
-            conversion_path cp
-        JOIN
-            distinct_edges de ON cp.end_unit = de.from_unit
-        WHERE
-            NOT (de.to_unit = ANY(cp.path_array)) -- avoid cycles
-            AND cp.depth < 10 -- prevent infinite loops
-    )
-    SELECT
-        total_factor
-    INTO
-        v_factor
-    FROM
-        conversion_path
-    WHERE
-        end_unit = p_to_unit
-    ORDER BY
-        depth ASC -- find the shortest path first
-    LIMIT 1;
-
-    IF v_factor IS NOT NULL THEN
-        RETURN v_factor;
-    END IF;
-
-    RAISE EXCEPTION 'No conversion path found from % to %.', p_from_unit, p_to_unit;
 END;
 $$;
 
 
--- Section 2: Update create_order function to use the new conversion logic
--- (The function body does not change, but it's good practice to re-apply it to ensure consistency)
+-- Section 2: Update database functions to handle the new structure
+DROP FUNCTION IF EXISTS public.get_products_with_categories();
+CREATE OR REPLACE FUNCTION public.get_products_with_categories()
+RETURNS TABLE(id bigint, name text, price numeric, image_url text, categories text[], recipe jsonb)
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT
+    p.id, p.name, p.price, p.image_url,
+    COALESCE((SELECT array_agg(c.name) FROM public.product_categories pc JOIN public.categories c ON pc.category_id = c.id WHERE pc.product_id = p.id), '{}'::text[]) as categories,
+    COALESCE(
+      (SELECT jsonb_agg(
+        CASE
+          WHEN pri.ingredient_id IS NOT NULL THEN
+            jsonb_build_object(
+              'type', 'ingredient',
+              'ingredientId', pri.ingredient_id,
+              'ingredientName', i.name,
+              'quantity', pri.quantity,
+              'unit', pri.unit
+            )
+          WHEN pri.sub_product_id IS NOT NULL THEN
+            jsonb_build_object(
+              'type', 'product',
+              'productId', pri.sub_product_id,
+              'productName', sub_p.name,
+              'quantity', pri.quantity,
+              'unit', pri.unit
+            )
+        END
+      )
+      FROM public.product_recipe_items pri
+      LEFT JOIN public.ingredients i ON pri.ingredient_id = i.id
+      LEFT JOIN public.products sub_p ON pri.sub_product_id = sub_p.id
+      WHERE pri.product_id = p.id),
+      '[]'::jsonb
+    ) as recipe
+  FROM public.products p ORDER BY p.name;
+$$;
+
+DROP FUNCTION IF EXISTS public.set_product_recipe(bigint, jsonb);
+CREATE OR REPLACE FUNCTION public.set_product_recipe(p_product_id bigint, p_recipe jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+    recipe_item jsonb;
+    v_ingredient_id bigint;
+    v_sub_product_id bigint;
+BEGIN
+    DELETE FROM public.product_recipe_items WHERE product_id = p_product_id;
+    IF jsonb_array_length(p_recipe) > 0 THEN
+        FOR recipe_item IN SELECT * FROM jsonb_array_elements(p_recipe) LOOP
+            v_ingredient_id := (recipe_item->>'ingredientId')::bigint;
+            v_sub_product_id := (recipe_item->>'productId')::bigint;
+            INSERT INTO public.product_recipe_items (product_id, ingredient_id, sub_product_id, quantity, unit)
+            VALUES (p_product_id, v_ingredient_id, v_sub_product_id, (recipe_item->>'quantity')::numeric, recipe_item->>'unit');
+        END LOOP;
+    END IF;
+END;
+$$;
+
 DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb, uuid);
 CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
     v_order_id uuid;
     order_item jsonb;
-    recipe_item record;
+    final_deductions RECORD;
     v_stock_unit text;
     v_conversion_factor numeric;
     v_deduction_amount numeric;
 BEGIN
     INSERT INTO public.orders (total, user_id) VALUES (p_total, p_user_id) RETURNING id INTO v_order_id;
-    FOR order_item IN SELECT * FROM jsonb_array_elements(p_items)
-    LOOP
+    FOR order_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
         INSERT INTO public.order_items (order_id, product_id, quantity, price)
         VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric);
-
-        FOR recipe_item IN
-            SELECT pi.ingredient_id, pi.quantity AS recipe_quantity, pi.unit AS recipe_unit
-            FROM public.product_ingredients pi
-            WHERE pi.product_id = (order_item->>'product_id')::bigint
-        LOOP
-            SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id;
-            v_conversion_factor := public.get_conversion_factor(recipe_item.recipe_unit, v_stock_unit, recipe_item.ingredient_id);
-            v_deduction_amount := recipe_item.recipe_quantity * v_conversion_factor * (order_item->>'quantity')::numeric;
-            UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id;
-        END LOOP;
+    END LOOP;
+    FOR final_deductions IN
+        WITH RECURSIVE bill_of_materials AS (
+            SELECT
+                (p_items_json->>'product_id')::bigint as root_product_id,
+                pri.sub_product_id,
+                pri.ingredient_id,
+                (p_items_json->>'quantity')::numeric * pri.quantity as total_quantity,
+                pri.unit,
+                1 as level
+            FROM jsonb_array_elements(p_items) AS p_items_json
+            JOIN public.product_recipe_items AS pri ON pri.product_id = (p_items_json->>'product_id')::bigint
+            UNION ALL
+            SELECT
+                bom.root_product_id,
+                pri.sub_product_id,
+                pri.ingredient_id,
+                bom.total_quantity * pri.quantity as total_quantity,
+                pri.unit,
+                bom.level + 1
+            FROM bill_of_materials bom
+            JOIN public.product_recipe_items pri ON pri.product_id = bom.sub_product_id
+            WHERE bom.sub_product_id IS NOT NULL AND bom.level < 10
+        )
+        SELECT
+            bom.ingredient_id,
+            bom.unit,
+            SUM(bom.total_quantity) as quantity_to_deduct
+        FROM bill_of_materials bom
+        WHERE bom.ingredient_id IS NOT NULL
+        GROUP BY bom.ingredient_id, bom.unit
+    LOOP
+        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = final_deductions.ingredient_id;
+        v_conversion_factor := public.get_conversion_factor(final_deductions.unit, v_stock_unit, final_deductions.ingredient_id);
+        v_deduction_amount := final_deductions.quantity_to_deduct * v_conversion_factor;
+        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = final_deductions.ingredient_id;
     END LOOP;
 END;
 $$;
 
 
 -- Section 3: Schema Versioning
-INSERT INTO public.schema_migrations (version) VALUES (11) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
+INSERT INTO public.schema_migrations (version) VALUES (12) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -147,7 +175,7 @@ INSERT INTO public.schema_migrations (version) VALUES (11) ON CONFLICT (version)
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-text-primary">Database Update Required</h1>
         <p className="text-text-secondary mt-2">
-          Your database schema is out of date and needs to be updated to v11 for more robust unit conversions.
+          Your database schema is out of date and needs to be updated to v12 for multi-level recipe support.
         </p>
       </div>
       <div className="space-y-6">
@@ -155,7 +183,7 @@ INSERT INTO public.schema_migrations (version) VALUES (11) ON CONFLICT (version)
             <h2 className="text-lg font-semibold text-text-primary mb-2">Instructions</h2>
             <ol className="list-decimal list-inside space-y-4 text-text-secondary bg-surface-main p-4 rounded-lg">
                 <li>
-                  <strong>This is a safe operation.</strong> The script below will not delete any of your existing data. It just updates a database function.
+                  <strong>This is a safe, non-destructive operation.</strong> The script below will not delete any of your existing data. It just updates tables and functions.
                 </li>
                 <li>
                     <strong>Copy the SQL script</strong> provided below. This script is idempotent, meaning it's safe to run multiple times.
@@ -173,7 +201,7 @@ INSERT INTO public.schema_migrations (version) VALUES (11) ON CONFLICT (version)
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v10 to v11)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v11 to v12)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

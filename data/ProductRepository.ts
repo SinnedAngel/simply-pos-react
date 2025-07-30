@@ -1,8 +1,7 @@
-
-import { Product } from '../domain/entities';
+import { Product, RecipeItem } from '../domain/entities';
 import { IProductRepository } from '../domain/ports';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database, RpcProduct } from '../types';
+import { Database, RpcProduct, RpcRecipeParamItem } from '../types';
 import { seedData } from './seed';
 
 // --- ADAPTER: Data Repository ---
@@ -69,26 +68,30 @@ export class ProductRepository implements IProductRepository {
     }
   }
 
+  private mapRecipeToRpc(recipe: RecipeItem[]): RpcRecipeParamItem[] {
+    return recipe.map(item => {
+        if (item.type === 'ingredient') {
+            return { ingredientId: item.ingredientId, quantity: item.quantity, unit: item.unit };
+        }
+        return { productId: item.productId, quantity: item.quantity, unit: item.unit };
+    });
+  }
+
   async updateProduct(product: Product): Promise<Product> {
     // 1. Update the product details in the 'products' table.
-    const productUpdate = {
+    const productUpdate: Database['public']['Tables']['products']['Update'] = {
         name: product.name,
         price: product.price,
         image_url: product.imageUrl,
     };
-    const { data, error: productError } = await this.supabase
+    const { error: productError } = await this.supabase
       .from('products')
       .update(productUpdate)
-      .eq('id', product.id)
-      .select()
-      .single();
+      .eq('id', product.id);
 
     if (productError) {
       console.error('Error updating product details:', productError);
       throw new Error(`Error updating product: ${productError.message}`);
-    }
-    if (!data) {
-      throw new Error(`Product with id ${product.id} not found for update.`);
     }
 
     // 2. Update the product's categories using the RPC.
@@ -103,10 +106,10 @@ export class ProductRepository implements IProductRepository {
     }
     
     // 3. Update the product's recipe using the RPC.
-    const recipeToSave = product.recipe.map(r => ({ ingredientId: r.ingredientId, quantity: r.quantity, unit: r.unit }));
+    const recipeToSave = this.mapRecipeToRpc(product.recipe);
     const { error: recipeError } = await this.supabase.rpc('set_product_recipe', {
         p_product_id: product.id,
-        p_recipe: recipeToSave as any, // Cast to any to match generic jsonb type
+        p_recipe: recipeToSave,
     });
 
     if (recipeError) {
@@ -121,7 +124,7 @@ export class ProductRepository implements IProductRepository {
     // Generate new ID by finding the current max and adding 1.
     const { data: maxIdData, error: maxIdError } = await this.supabase
       .from('products')
-      .select('*')
+      .select('id')
       .order('id', { ascending: false })
       .limit(1)
       .single();
@@ -131,10 +134,10 @@ export class ProductRepository implements IProductRepository {
       throw new Error(`Could not determine new product ID: ${maxIdError.message}`);
     }
 
-    const newId = ((maxIdData as any)?.id ?? 0) + 1;
+    const newId = (maxIdData?.id ?? 0) + 1;
 
     // 1. Insert the new product into the 'products' table.
-    const newProductRecord = {
+    const newProductRecord: Database['public']['Tables']['products']['Insert'] = {
       id: newId,
       name: productData.name,
       price: productData.price,
@@ -162,10 +165,10 @@ export class ProductRepository implements IProductRepository {
     }
 
      // 3. Set the product's recipe using the RPC.
-    const recipeToSave = productData.recipe.map(r => ({ ingredientId: r.ingredientId, quantity: r.quantity, unit: r.unit }));
+    const recipeToSave = this.mapRecipeToRpc(productData.recipe);
     const { error: recipeError } = await this.supabase.rpc('set_product_recipe', {
         p_product_id: newId,
-        p_recipe: recipeToSave as any, // Cast to any to match generic jsonb type
+        p_recipe: recipeToSave,
     });
 
     if (recipeError) {
@@ -179,7 +182,7 @@ export class ProductRepository implements IProductRepository {
 
   async deleteProduct(productId: number): Promise<void> {
     // RLS and cascading deletes on the DB will handle removing entries
-    // from product_categories and product_ingredients tables.
+    // from product_categories and product_recipe_items tables.
     const { error } = await this.supabase
       .from('products')
       .delete()

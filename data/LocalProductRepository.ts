@@ -1,4 +1,3 @@
-
 import { Product } from '../domain/entities';
 import { IProductRepository } from '../domain/ports';
 import { seedData } from './seed';
@@ -9,7 +8,12 @@ import { seedData } from './seed';
 export class LocalProductRepository implements IProductRepository {
   async getProducts(): Promise<Product[]> {
     // Simulate the async nature of a real data fetch
-    return Promise.resolve(seedData);
+    // Add the required 'recipe' property to match the Product entity
+    const products: Product[] = seedData.map(p => ({
+        ...p,
+        recipe: [], // Add empty recipe array
+    }));
+    return Promise.resolve(products);
   }
 
   async getCategories(): Promise<string[]> {

@@ -227,6 +227,7 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
       {editingProduct !== null && (
         <EditProductModal
           product={editingProduct}
+          allProducts={products}
           inventoryUseCases={inventoryUseCases}
           mediaUseCases={mediaUseCases}
           categories={categories}
