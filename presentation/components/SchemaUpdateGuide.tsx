@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface SchemaUpdateGuideProps {
@@ -28,15 +29,80 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Database Migration Script v9 to v10 (Order Log)
--- This script adds a user_id to orders and functions to view an order log by cashier.
+-- Danum POS - Database Migration Script v10 to v11 (Multi-step Conversions)
+-- This script updates the unit conversion function to support multi-step paths.
 
--- Section 1: Add user_id column to orders table
--- It's nullable to support orders created before this update.
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS user_id uuid NULL REFERENCES public.users(id);
+-- Section 1: Replace the unit conversion function with a more robust version
+DROP FUNCTION IF EXISTS public.get_conversion_factor(text, text, bigint);
+CREATE OR REPLACE FUNCTION public.get_conversion_factor(p_from_unit text, p_to_unit text, p_ingredient_id bigint)
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER AS $$
+DECLARE
+    v_factor numeric;
+BEGIN
+    IF p_from_unit = p_to_unit THEN
+        RETURN 1.0;
+    END IF;
 
--- Section 2: Update create_order function to include user_id
-DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb);
+    WITH RECURSIVE all_possible_edges AS (
+        -- Get all applicable conversions, both direct and inverse
+        SELECT from_unit, to_unit, factor, ingredient_id FROM public.unit_conversions WHERE ingredient_id = p_ingredient_id OR ingredient_id IS NULL
+        UNION ALL
+        SELECT to_unit as from_unit, from_unit as to_unit, 1.0/factor as factor, ingredient_id FROM public.unit_conversions WHERE ingredient_id = p_ingredient_id OR ingredient_id IS NULL
+    ),
+    distinct_edges AS (
+        -- For each from/to pair, pick the most specific conversion (ingredient-specific wins over generic)
+        SELECT DISTINCT ON (from_unit, to_unit) from_unit, to_unit, factor
+        FROM all_possible_edges
+        ORDER BY from_unit, to_unit, ingredient_id DESC NULLS LAST
+    ),
+    conversion_path AS (
+        -- Base case: start from the source unit
+        SELECT
+            p_from_unit as end_unit,
+            1.0::numeric as total_factor,
+            ARRAY[p_from_unit] as path_array,
+            1 as depth
+        UNION ALL
+        -- Recursive step: explore next conversions
+        SELECT
+            de.to_unit as end_unit,
+            cp.total_factor * de.factor,
+            cp.path_array || de.to_unit,
+            cp.depth + 1
+        FROM
+            conversion_path cp
+        JOIN
+            distinct_edges de ON cp.end_unit = de.from_unit
+        WHERE
+            NOT (de.to_unit = ANY(cp.path_array)) -- avoid cycles
+            AND cp.depth < 10 -- prevent infinite loops
+    )
+    SELECT
+        total_factor
+    INTO
+        v_factor
+    FROM
+        conversion_path
+    WHERE
+        end_unit = p_to_unit
+    ORDER BY
+        depth ASC -- find the shortest path first
+    LIMIT 1;
+
+    IF v_factor IS NOT NULL THEN
+        RETURN v_factor;
+    END IF;
+
+    RAISE EXCEPTION 'No conversion path found from % to %.', p_from_unit, p_to_unit;
+END;
+$$;
+
+
+-- Section 2: Update create_order function to use the new conversion logic
+-- (The function body does not change, but it's good practice to re-apply it to ensure consistency)
+DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb, uuid);
 CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid)
 RETURNS void
 LANGUAGE plpgsql
@@ -70,45 +136,8 @@ END;
 $$;
 
 
--- Section 3: Add new function to get order log with cashier details
-CREATE OR REPLACE FUNCTION public.get_order_log(p_start_date date, p_end_date date)
-RETURNS TABLE(
-    order_id uuid,
-    created_at timestamptz,
-    total numeric,
-    cashier_username text,
-    items jsonb
-)
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT
-    o.id as order_id,
-    o.created_at,
-    o.total,
-    u.username as cashier_username,
-    COALESCE(
-      (
-        SELECT jsonb_agg(
-          jsonb_build_object(
-            'productName', p.name,
-            'quantity', oi.quantity,
-            'price', oi.price
-          ) ORDER BY p.name
-        )
-        FROM public.order_items oi
-        JOIN public.products p ON oi.product_id = p.id
-        WHERE oi.order_id = o.id
-      ),
-      '[]'::jsonb
-    ) as items
-  FROM public.orders o
-  LEFT JOIN public.users u ON o.user_id = u.id
-  WHERE o.created_at >= p_start_date AND o.created_at < p_end_date + interval '1 day'
-  ORDER BY o.created_at DESC;
-$$;
-
-
--- Section 4: Schema Versioning
-INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
+-- Section 3: Schema Versioning
+INSERT INTO public.schema_migrations (version) VALUES (11) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -118,7 +147,7 @@ INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version)
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-text-primary">Database Update Required</h1>
         <p className="text-text-secondary mt-2">
-          Your database schema is out of date and needs to be updated. The script below will bring it to the latest version.
+          Your database schema is out of date and needs to be updated to v11 for more robust unit conversions.
         </p>
       </div>
       <div className="space-y-6">
@@ -126,7 +155,7 @@ INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version)
             <h2 className="text-lg font-semibold text-text-primary mb-2">Instructions</h2>
             <ol className="list-decimal list-inside space-y-4 text-text-secondary bg-surface-main p-4 rounded-lg">
                 <li>
-                  <strong>This is a safe operation.</strong> The script below will not delete any of your existing products, users, or other data. It migrates your existing data and adds new features.
+                  <strong>This is a safe operation.</strong> The script below will not delete any of your existing data. It just updates a database function.
                 </li>
                 <li>
                     <strong>Copy the SQL script</strong> provided below. This script is idempotent, meaning it's safe to run multiple times.
@@ -144,7 +173,7 @@ INSERT INTO public.schema_migrations (version) VALUES (10) ON CONFLICT (version)
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v9 to v10)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v10 to v11)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

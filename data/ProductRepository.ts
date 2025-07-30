@@ -78,7 +78,7 @@ export class ProductRepository implements IProductRepository {
     };
     const { data, error: productError } = await this.supabase
       .from('products')
-      .update(productUpdate as any)
+      .update(productUpdate)
       .eq('id', product.id)
       .select()
       .single();
@@ -143,7 +143,7 @@ export class ProductRepository implements IProductRepository {
 
     const { error: insertError } = await this.supabase
       .from('products')
-      .insert(newProductRecord as any);
+      .insert([newProductRecord]);
 
     if (insertError) {
       console.error('Error creating product:', insertError);

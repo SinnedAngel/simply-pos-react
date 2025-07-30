@@ -40,7 +40,7 @@ export class IngredientRepository implements IIngredientRepository {
     // We need to fetch the created ingredient to get its ID
     const { data: newIngredient, error: fetchError } = await this.supabase
         .from('ingredients')
-        .select('id, name, stock_level, stock_unit')
+        .select('*')
         .eq('name', name)
         .single();
     
@@ -48,13 +48,11 @@ export class IngredientRepository implements IIngredientRepository {
         throw new Error('Ingredient was created, but failed to fetch it back.');
     }
     
-    const typedIngredient = newIngredient as Database['public']['Tables']['ingredients']['Row'];
-
     return {
-        id: typedIngredient.id,
-        name: typedIngredient.name,
-        stockLevel: typedIngredient.stock_level,
-        stockUnit: typedIngredient.stock_unit,
+        id: newIngredient.id,
+        name: newIngredient.name,
+        stockLevel: newIngredient.stock_level,
+        stockUnit: newIngredient.stock_unit,
     };
   }
   

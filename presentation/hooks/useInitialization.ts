@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '../../types';
@@ -39,7 +40,7 @@ export type UseCaseBundle = {
 };
 
 // This constant should be incremented whenever a breaking schema change is made.
-const LATEST_SCHEMA_VERSION = 10;
+const LATEST_SCHEMA_VERSION = 11;
 
 // A helper function to ensure a minimum time passes, for better UX
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
