@@ -1,4 +1,5 @@
 
+
 import { IProductRepository } from '../ports';
 import { Product } from '../entities';
 
@@ -21,15 +22,31 @@ export class ProductUseCases {
   }
 
   async updateProduct(product: Product): Promise<Product> {
-    if (!product.name || product.price <= 0 || !product.categories || product.categories.length === 0) {
-      throw new Error('Invalid product data. Name cannot be empty, price must be positive, and at least one category is required.');
+    if (!product.name || product.name.trim().length === 0) {
+      throw new Error('Invalid product data. Name cannot be empty.');
+    }
+    if (product.isForSale) {
+        if (product.price <= 0) {
+            throw new Error('Invalid product data. Price must be a positive number for saleable items.');
+        }
+        if (!product.categories || product.categories.length === 0) {
+            throw new Error('Invalid product data. At least one category is required for saleable items.');
+        }
     }
     return await this.productRepository.updateProduct(product);
   }
 
   async createProduct(productData: Omit<Product, 'id'>): Promise<Product> {
-    if (!productData.name || productData.price <= 0 || !productData.categories || productData.categories.length === 0) {
-      throw new Error('Invalid product data. Name cannot be empty, price must be positive, and at least one category is required.');
+    if (!productData.name || productData.name.trim().length === 0) {
+      throw new Error('Invalid product data. Name cannot be empty.');
+    }
+    if (productData.isForSale) {
+        if (productData.price <= 0) {
+            throw new Error('Invalid product data. Price must be a positive number for saleable items.');
+        }
+        if (!productData.categories || productData.categories.length === 0) {
+            throw new Error('Invalid product data. At least one category is required for saleable items.');
+        }
     }
     return await this.productRepository.createProduct(productData);
   }
@@ -59,5 +76,12 @@ export class ProductUseCases {
       throw new Error("Cannot merge a category into itself.");
     }
     await this.productRepository.mergeCategories(sourceCategory, destinationCategory);
+  }
+
+  async restockPreparation(productId: number, quantityToAdd: number): Promise<void> {
+    if (!productId || quantityToAdd <= 0) {
+        throw new Error('Valid product ID and a positive quantity are required to restock.');
+    }
+    await this.productRepository.restockPreparation(productId, quantityToAdd);
   }
 }

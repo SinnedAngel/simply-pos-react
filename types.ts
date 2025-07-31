@@ -1,12 +1,3 @@
-// A standard type for JSON data, which is missing and causes compilation errors.
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[];
-
 // Specific type for recipe items returned by RPC.
 // Defined locally to prevent complex cross-file type resolution issues in the Database type.
 export type RpcRecipeItem =
@@ -34,6 +25,9 @@ export type RpcProduct = {
   image_url: string;
   categories: string[];
   recipe: RpcRecipeItem[];
+  is_for_sale: boolean;
+  stock_level: number | null;
+  stock_unit: string | null;
 };
 
 // Type for ingredients returned by `get_all_ingredients` RPC
@@ -113,18 +107,27 @@ export interface Database {
           name: string;
           price: number;
           image_url: string;
+          is_for_sale: boolean;
+          stock_level: number | null;
+          stock_unit: string | null;
         };
         Insert: {
           id: number;
           name: string;
           price: number;
           image_url: string;
+          is_for_sale?: boolean;
+          stock_level?: number | null;
+          stock_unit?: string | null;
         };
         Update: {
           id?: number;
           name?: string;
           price?: number;
           image_url?: string;
+          is_for_sale?: boolean;
+          stock_level?: number | null;
+          stock_unit?: string | null;
         };
         Relationships: [];
       };
@@ -158,15 +161,17 @@ export interface Database {
         };
         Relationships: [
           {
-            foreignKeyName: "product_categories_product_id_fkey";
-            columns: ["product_id"];
-            referencedRelation: "products";
+            foreignKeyName: "product_categories_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "categories";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "product_categories_category_id_fkey";
-            columns: ["category_id"];
-            referencedRelation: "categories";
+            foreignKeyName: "product_categories_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
             referencedColumns: ["id"];
           }
         ];
@@ -209,6 +214,7 @@ export interface Database {
           {
             foreignKeyName: "users_role_id_fkey";
             columns: ["role_id"];
+            isOneToOne: false;
             referencedRelation: "roles";
             referencedColumns: ["id"];
           }
@@ -231,6 +237,7 @@ export interface Database {
           {
             foreignKeyName: "role_permissions_role_id_fkey";
             columns: ["role_id"];
+            isOneToOne: false;
             referencedRelation: "roles";
             referencedColumns: ["id"];
           }
@@ -274,6 +281,7 @@ export interface Database {
           {
             foreignKeyName: "orders_user_id_fkey";
             columns: ["user_id"];
+            isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];
           }
@@ -305,12 +313,14 @@ export interface Database {
           {
             foreignKeyName: "order_items_order_id_fkey";
             columns: ["order_id"];
+            isOneToOne: false;
             referencedRelation: "orders";
             referencedColumns: ["id"];
           },
           {
             foreignKeyName: "order_items_product_id_fkey";
             columns: ["product_id"];
+            isOneToOne: false;
             referencedRelation: "products";
             referencedColumns: ["id"];
           }
@@ -363,24 +373,27 @@ export interface Database {
             unit?: string;
         };
         Relationships: [
-             {
-                foreignKeyName: "product_recipe_items_product_id_fkey";
-                columns: ["product_id"];
-                referencedRelation: "products";
-                referencedColumns: ["id"];
-            },
-            {
-                foreignKeyName: "product_recipe_items_ingredient_id_fkey";
-                columns: ["ingredient_id"];
-                referencedRelation: "ingredients";
-                referencedColumns: ["id"];
-            },
-            {
-                foreignKeyName: "product_recipe_items_sub_product_id_fkey";
-                columns: ["sub_product_id"];
-                referencedRelation: "products";
-                referencedColumns: ["id"];
-            }
+          {
+            foreignKeyName: "product_recipe_items_ingredient_id_fkey";
+            columns: ["ingredient_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "product_recipe_items_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "product_recipe_items_sub_product_id_fkey";
+            columns: ["sub_product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          }
         ];
       };
       unit_conversions: {
@@ -409,6 +422,7 @@ export interface Database {
           {
             foreignKeyName: "unit_conversions_ingredient_id_fkey";
             columns: ["ingredient_id"];
+            isOneToOne: false;
             referencedRelation: "ingredients";
             referencedColumns: ["id"];
           }
@@ -441,7 +455,7 @@ export interface Database {
       };
       get_products_with_categories: {
         Args: Record<string, unknown>;
-        Returns: RpcProduct[];
+        Returns: any;
       };
       set_product_categories: {
         Args: {
@@ -554,19 +568,19 @@ export interface Database {
           p_start_date: string;
           p_end_date: string;
         };
-        Returns: RpcSaleReport;
+        Returns: any;
       };
       get_order_log: {
         Args: {
           p_start_date: string;
           p_end_date: string;
         };
-        Returns: RpcOrderLogItem[];
+        Returns: any;
       };
       // Inventory & Conversion Functions
       get_all_ingredients: {
         Args: Record<string, unknown>;
-        Returns: RpcIngredient[];
+        Returns: any;
       };
       create_ingredient: {
         Args: {
@@ -598,13 +612,20 @@ export interface Database {
         };
         Returns: void;
       };
+      restock_preparation: {
+        Args: {
+          p_product_id: number;
+          p_quantity_to_add: number;
+        };
+        Returns: void;
+      };
       seed_inventory_and_recipes: {
         Args: Record<string, unknown>;
         Returns: void;
       };
       get_all_conversions: {
         Args: Record<string, unknown>;
-        Returns: RpcConversion[];
+        Returns: any;
       };
       create_conversion: {
         Args: {

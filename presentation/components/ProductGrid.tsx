@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Product } from '../../domain/entities';
 import ProductCard from './ProductCard';
@@ -15,9 +14,12 @@ interface ProductGridProps {
 const ProductGrid: React.FC<ProductGridProps> = ({ products, categories, onProductSelect, onEditProduct, canEditProducts, canAddToOrder }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   
+  // Filter for only saleable products first
+  const saleableProducts = products.filter(p => p.isForSale);
+  
   const filteredProducts = selectedCategory === 'All' 
-    ? products 
-    : products.filter(p => p.categories.includes(selectedCategory));
+    ? saleableProducts
+    : saleableProducts.filter(p => p.categories.includes(selectedCategory));
 
   return (
     <div className="mt-8">

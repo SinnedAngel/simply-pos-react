@@ -1,17 +1,20 @@
 
 import React, { useState } from 'react';
-import { Ingredient } from '../../domain/entities';
+import { Ingredient, Product } from '../../domain/entities';
 
-interface EditIngredientModalProps {
-  ingredient: Ingredient;
-  onSave: (ingredient: Ingredient) => Promise<void>;
+interface EditStockItemModalProps {
+  item: Ingredient | Product;
+  onSave: (item: Ingredient | Product) => Promise<void>;
   onCancel: () => void;
 }
 
-const EditIngredientModal: React.FC<EditIngredientModalProps> = ({ ingredient, onSave, onCancel }) => {
-    const [name, setName] = useState(ingredient.name);
-    const [stockUnit, setStockUnit] = useState(ingredient.stockUnit);
-    const [stockLevel, setStockLevel] = useState(ingredient.stockLevel);
+const EditStockItemModal: React.FC<EditStockItemModalProps> = ({ item, onSave, onCancel }) => {
+    const isProduct = 'price' in item; // Differentiate between Product and Ingredient
+
+    const [name, setName] = useState(item.name);
+    const [stockLevel, setStockLevel] = useState(item.stockLevel ?? 0);
+    const [stockUnit, setStockUnit] = useState(item.stockUnit ?? '');
+    
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
@@ -23,7 +26,13 @@ const EditIngredientModal: React.FC<EditIngredientModalProps> = ({ ingredient, o
         setError('');
         setIsSaving(true);
         try {
-            await onSave({ ...ingredient, name, stockUnit: stockUnit, stockLevel });
+            const updatedItem = {
+                ...item,
+                name,
+                stockLevel,
+                stockUnit,
+            };
+            await onSave(updatedItem);
         } catch(e) {
             setError(e instanceof Error ? e.message : 'An unknown error occurred.');
             setIsSaving(false);
@@ -33,11 +42,12 @@ const EditIngredientModal: React.FC<EditIngredientModalProps> = ({ ingredient, o
     return (
          <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex justify-center items-center animate-fade-in">
               <div className="bg-surface-card rounded-xl shadow-2xl p-6 sm:p-8 w-full max-w-md">
-                 <h2 className="text-2xl font-bold text-text-primary mb-6">Edit Ingredient</h2>
+                 <h2 className="text-2xl font-bold text-text-primary mb-6">Edit Stock Item</h2>
                  <div className="space-y-4">
                     <div>
-                        <label htmlFor="edit-ing-name" className="block text-sm font-medium text-text-secondary mb-2">Ingredient Name</label>
-                        <input id="edit-ing-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
+                        <label htmlFor="edit-ing-name" className="block text-sm font-medium text-text-secondary mb-2">Item Name</label>
+                        <input id="edit-ing-name" type="text" value={name} onChange={(e) => setName(e.target.value)} disabled={isProduct} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none disabled:opacity-70 disabled:cursor-not-allowed"/>
+                         {isProduct && <p className="text-xs text-text-secondary mt-1">Preparation name cannot be changed here. Edit it from the Menu Management page.</p>}
                     </div>
                      <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -63,4 +73,4 @@ const EditIngredientModal: React.FC<EditIngredientModalProps> = ({ ingredient, o
     );
 };
 
-export default EditIngredientModal;
+export default EditStockItemModal;

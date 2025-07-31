@@ -14,6 +14,7 @@ export interface IProductRepository {
   deleteProduct(productId: number): Promise<void>;
   updateCategoryName(oldName: string, newName: string): Promise<void>;
   mergeCategories(sourceCategory: string, destinationCategory: string): Promise<void>;
+  restockPreparation(productId: number, quantityToAdd: number): Promise<void>;
 }
 
 export interface IAuthRepository {

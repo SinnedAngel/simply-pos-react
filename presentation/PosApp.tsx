@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useProducts } from './hooks/useProducts';
 import { useOrder } from './hooks/useOrder';
@@ -33,6 +34,8 @@ interface PosAppProps {
 }
 
 type AppView = 'pos' | 'menu' | 'categories' | 'inventory' | 'conversions' | 'media' | 'accounts' | 'roles' | 'reporting';
+type EditingProductState = Product | { mode: 'new'; defaults?: Partial<Omit<Product, 'id' | 'recipe' | 'categories'>> } | null;
+
 
 function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, salesUseCases, inventoryUseCases, conversionUseCases, onSessionEnd }: PosAppProps) {
   const { products, categories, isLoading, error, isDbEmpty, schemaError, refetch } = useProducts(productUseCases);
@@ -42,7 +45,7 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedError, setSeedError] = useState<string | null>(null);
-  const [editingProduct, setEditingProduct] = useState<Product | 'new' | null>(null);
+  const [editingProduct, setEditingProduct] = useState<EditingProductState>(null);
   const [session, setSession] = useState<UserSession | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [isOrderSummaryVisible, setIsOrderSummaryVisible] = useState(false);
@@ -176,11 +179,19 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
       case 'pos':
         return renderPosContent();
       case 'menu':
-        return <MenuManagementPage productUseCases={productUseCases} onEditProduct={setEditingProduct} onAddProduct={() => setEditingProduct('new')} />;
+        return <MenuManagementPage productUseCases={productUseCases} onEditProduct={setEditingProduct} onAddProduct={() => setEditingProduct({ mode: 'new' })} />;
       case 'categories':
         return <CategoryManagementPage productUseCases={productUseCases} />;
       case 'inventory':
-        return <InventoryPage useCases={inventoryUseCases} />;
+        return <InventoryPage
+          useCases={inventoryUseCases}
+          productUseCases={productUseCases}
+          onAddPreparation={() => setEditingProduct({ mode: 'new', defaults: { isForSale: false, stockLevel: 0, stockUnit: '', imageUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMWYyOTM3IiAvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNkMWQ1ZGIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZSBhdmFpbGFibGUgc29vbjwvdGV4dD48L3N2Zz4=' } })}
+          products={products}
+          isLoadingProducts={isLoading}
+          productsError={error}
+          refetchProducts={refetch}
+        />;
       case 'conversions':
         return <ConversionManagementPage conversionUseCases={conversionUseCases} inventoryUseCases={inventoryUseCases} />;
       case 'media':

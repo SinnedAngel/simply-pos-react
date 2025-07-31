@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Product } from '../../domain/entities';
 import { ProductUseCases } from '../../domain/use-cases';
@@ -59,6 +58,7 @@ const MenuManagementPage: React.FC<MenuManagementPageProps> = ({ productUseCases
                   <tr>
                     <th className="p-4 font-semibold text-sm w-24">Image</th>
                     <th className="p-4 font-semibold text-sm">Name</th>
+                    <th className="p-4 font-semibold text-sm">Status</th>
                     <th className="p-4 font-semibold text-sm">Categories</th>
                     <th className="p-4 font-semibold text-sm">Price</th>
                     <th className="p-4 font-semibold text-sm text-right">Actions</th>
@@ -71,6 +71,13 @@ const MenuManagementPage: React.FC<MenuManagementPageProps> = ({ productUseCases
                         <img src={product.imageUrl} alt={product.name} className="w-16 h-12 object-cover rounded-md bg-surface-main" />
                       </td>
                       <td className="p-4 font-medium text-text-primary">{product.name}</td>
+                      <td className="p-4">
+                        {product.isForSale ? (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-500/20 text-green-300">For Sale</span>
+                        ) : (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-300">Preparation</span>
+                        )}
+                      </td>
                       <td className="p-4 text-text-secondary">{product.categories.join(', ')}</td>
                       <td className="p-4 text-text-secondary">Rp {product.price.toLocaleString('id-ID')}</td>
                       <td className="p-4 text-right">
@@ -98,7 +105,11 @@ const MenuManagementPage: React.FC<MenuManagementPageProps> = ({ productUseCases
                         <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-lg bg-surface-main" />
                         <div className="flex-grow">
                             <h3 className="font-bold text-text-primary">{product.name}</h3>
-                            <p className="text-sm text-brand-accent font-semibold mt-1">Rp {product.price.toLocaleString('id-ID')}</p>
+                             {product.isForSale ? (
+                                <span className="text-sm text-brand-accent font-semibold mt-1 block">Rp {product.price.toLocaleString('id-ID')}</span>
+                            ) : (
+                                <span className="px-2 py-0.5 mt-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-300 inline-block">Preparation</span>
+                            )}
                             <p className="text-xs text-text-secondary mt-2 truncate">{product.categories.join(', ')}</p>
                         </div>
                          <div className="flex flex-col gap-2">

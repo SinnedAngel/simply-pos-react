@@ -1,4 +1,3 @@
-
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database, RpcIngredient } from '../types';
 import { Ingredient } from '../domain/entities';

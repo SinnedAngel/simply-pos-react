@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Product, StoredImage, Ingredient, RecipeItem } from '../../domain/entities';
 import { MediaUseCases, InventoryUseCases } from '../../domain/use-cases';
@@ -9,8 +10,11 @@ import { TrashIcon } from './icons/TrashIcon';
 import { CubeIcon } from './icons/CubeIcon';
 import { BeakerIcon } from './icons/BeakerIcon';
 
+type EditingProductState = Product | { mode: 'new'; defaults?: Partial<Omit<Product, 'id' | 'recipe' | 'categories'>> } | null;
+
+
 interface EditProductModalProps {
-  product: Product | 'new' | null;
+  product: EditingProductState;
   allProducts: Product[];
   mediaUseCases: MediaUseCases;
   inventoryUseCases: InventoryUseCases;
@@ -39,17 +43,39 @@ const CategoryCheckbox: React.FC<{
     </label>
 );
 
+const ToggleSwitch: React.FC<{ label: string; enabled: boolean; setEnabled: (enabled: boolean) => void; description?: string;}> = ({ label, enabled, setEnabled, description }) => (
+    <div className="flex items-center justify-between">
+        <div>
+            <label className="text-sm font-medium text-text-primary">{label}</label>
+            {description && <p className="text-xs text-text-secondary">{description}</p>}
+        </div>
+        <button
+            type="button"
+            className={`${enabled ? 'bg-brand-secondary' : 'bg-gray-600'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-surface-card`}
+            onClick={() => setEnabled(!enabled)}
+        >
+            <span className={`${enabled ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}/>
+        </button>
+    </div>
+);
+
 
 const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProducts, mediaUseCases, inventoryUseCases, categories, onSave, onCancel }) => {
-  const isNew = product === 'new';
-  const productData = isNew ? null : product;
+  const isNew = product !== null && typeof product === 'object' && !('id' in product);
+  const productData = product !== null && typeof product === 'object' && 'id' in product ? product : null;
+  const defaultValues = isNew ? (product as { defaults?: any }).defaults || {} : {};
 
   // Form State
-  const [name, setName] = useState(productData?.name ?? '');
-  const [price, setPrice] = useState(productData?.price ?? 0);
+  const [name, setName] = useState(productData?.name ?? defaultValues.name ?? '');
+  const [price, setPrice] = useState(productData?.price ?? defaultValues.price ?? 0);
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set(productData?.categories ?? []));
-  const [selectedImageUrl, setSelectedImageUrl] = useState(productData?.imageUrl ?? '');
+  const [selectedImageUrl, setSelectedImageUrl] = useState(productData?.imageUrl ?? defaultValues.imageUrl ?? '');
   const [recipe, setRecipe] = useState<RecipeItem[]>(productData?.recipe ?? []);
+  
+  const [isForSale, setIsForSale] = useState(productData?.isForSale ?? defaultValues.isForSale ?? true);
+  const [isTracked, setIsTracked] = useState(productData ? productData.stockLevel !== null : (defaultValues.stockLevel !== undefined));
+  const [stockLevel, setStockLevel] = useState(productData?.stockLevel ?? defaultValues.stockLevel ?? 0);
+  const [stockUnit, setStockUnit] = useState(productData?.stockUnit ?? defaultValues.stockUnit ?? '');
   
   // Modal/Interaction State
   const [isSaving, setIsSaving] = useState(false);
@@ -78,6 +104,14 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
     }
     fetchIngredients();
   }, [inventoryUseCases]);
+
+  useEffect(() => {
+    // When toggling 'isForSale' off, if the user is on the 'Image' tab on mobile,
+    // switch them back to the 'Details' tab.
+    if (!isForSale && activeTab === 'image') {
+        setActiveTab('details');
+    }
+  }, [isForSale, activeTab]);
 
 
   const handleCategoryChange = (category: string, isChecked: boolean) => {
@@ -148,21 +182,36 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
   }
 
   const handleSave = async () => {
+    // General validations
     if (!name.trim()) { setError('Product name is required.'); return; }
-    if (selectedCategories.size === 0) { setError('At least one category must be selected.'); return; }
-    if (isNaN(price) || price <= 0) { setError('Price must be a positive number.'); return; }
-    if (!selectedImageUrl) { setError('You must select an image for the product.'); return; }
+    if (isTracked && !stockUnit.trim()) { setError('Stock unit is required for tracked items.'); return;}
+
+    // Validations only for items for sale
+    if (isForSale) {
+        if (selectedCategories.size === 0) { setError('At least one category must be selected for saleable items.'); return; }
+        if (isNaN(price) || price <= 0) { setError('Price must be a positive number for items for sale.'); return; }
+        if (!selectedImageUrl) { setError('You must select an image for the product.'); return; }
+    }
     
     setError('');
     setIsSaving(true);
     
-    const saveData = { name, price, categories: Array.from(selectedCategories), imageUrl: selectedImageUrl, recipe };
+    const saveData = { 
+        name, 
+        price: isForSale ? price : 0, 
+        categories: isForSale ? Array.from(selectedCategories) : [],
+        imageUrl: selectedImageUrl, 
+        recipe,
+        isForSale,
+        stockLevel: isTracked ? stockLevel : null,
+        stockUnit: isTracked ? stockUnit : null,
+    };
 
     try {
-        if (isNew) {
-            await onSave(saveData);
+        if (productData) {
+            await onSave({ ...saveData, id: productData.id });
         } else {
-            await onSave({ ...saveData, id: productData!.id });
+            await onSave(saveData);
         }
     } catch (e) {
         setError(e instanceof Error ? e.message : 'An unknown error occurred during save.');
@@ -184,12 +233,12 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
        .filter(p => 
         p.name.toLowerCase().includes(recipeSearch.toLowerCase()) &&
         !recipe.some(r => r.type === 'product' && r.productId === p.id) &&
-        (isNew || p.id !== productData!.id) // Prevent adding itself to its own recipe
+        (!productData || p.id !== productData.id) // Prevent adding itself to its own recipe
       )
       .map(p => ({ ...p, itemType: 'product' as const }));
 
     return [...ingredients, ...products].slice(0, 10);
-  }, [recipeSearch, allIngredients, allProducts, recipe, isNew, productData]);
+  }, [recipeSearch, allIngredients, allProducts, recipe, productData]);
   
   const TabButton: React.FC<{tab: MobileTab, children: React.ReactNode}> = ({ tab, children }) => (
     <button 
@@ -206,21 +255,45 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
             <label htmlFor="product-name" className="block text-sm font-medium text-text-secondary mb-2">Product Name</label>
             <input id="product-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., Iced Latte" />
         </div>
-        <div>
-            <label htmlFor="product-price" className="block text-sm font-medium text-text-secondary mb-2">Price</label>
-            <input id="product-price" type="number" value={price} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., 25000"/>
+        
+        <div className="space-y-3 p-3 bg-surface-main/50 rounded-md">
+            <ToggleSwitch label="Item is for sale" enabled={isForSale} setEnabled={setIsForSale} description="Visible on the Point of Sale screen." />
+            <ToggleSwitch label="Track item stock" enabled={isTracked} setEnabled={setIsTracked} description="Enable to manage stock for this item." />
         </div>
-        <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">Categories</label>
-            <div className="w-full max-h-40 overflow-y-auto bg-surface-main rounded-md p-2 border border-gray-600 grid grid-cols-2 gap-1">
-                {categories.length > 0 ? categories.map(cat => <CategoryCheckbox key={cat} category={cat} isChecked={selectedCategories.has(cat)} onChange={handleCategoryChange} disabled={false} />) : <p className="text-text-secondary text-sm p-2 col-span-2 text-center">No categories exist.</p>}
+
+        {isForSale && (
+            <div>
+                <label htmlFor="product-price" className="block text-sm font-medium text-text-secondary mb-2">Price</label>
+                <input id="product-price" type="number" value={price} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., 25000"/>
             </div>
-        </div>
+        )}
+        
+        {isTracked && (
+            <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label htmlFor="stock-level" className="block text-sm font-medium text-text-secondary mb-2">Current Stock</label>
+                    <input id="stock-level" type="number" value={stockLevel} onChange={(e) => setStockLevel(parseFloat(e.target.value) || 0)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
+                </div>
+                 <div>
+                    <label htmlFor="stock-unit" className="block text-sm font-medium text-text-secondary mb-2">Stock Unit</label>
+                    <input id="stock-unit" type="text" value={stockUnit} onChange={(e) => setStockUnit(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none" placeholder="e.g., gram, ml, pcs"/>
+                </div>
+            </div>
+        )}
+        
+        {isForSale && (
+            <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">Categories</label>
+                <div className="w-full max-h-40 overflow-y-auto bg-surface-main rounded-md p-2 border border-gray-600 grid grid-cols-2 gap-1">
+                    {categories.length > 0 ? categories.map(cat => <CategoryCheckbox key={cat} category={cat} isChecked={selectedCategories.has(cat)} onChange={handleCategoryChange} disabled={false} />) : <p className="text-text-secondary text-sm p-2 col-span-2 text-center">No categories exist.</p>}
+                </div>
+            </div>
+        )}
      </div>
   );
   
   const FormRecipe = (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 mt-6">
         <label className="block text-sm font-medium text-text-secondary">Recipe Components</label>
         <div className="relative">
             <input type="text" placeholder="Search to add ingredients or products..." value={recipeSearch} onChange={e => setRecipeSearch(e.target.value)} className="w-full px-4 py-2 bg-surface-main border border-gray-600 rounded-md focus:ring-2 focus:ring-brand-accent focus:outline-none"/>
@@ -296,7 +369,7 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
       <div className="bg-surface-card shadow-2xl flex flex-col w-full h-full sm:rounded-xl sm:w-full sm:max-w-6xl sm:h-[90vh]">
         {/* Header */}
         <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-700">
-            <h2 className="text-2xl font-bold text-text-primary">{isNew ? 'Add New Product' : 'Edit Product'}</h2>
+            <h2 className="text-2xl font-bold text-text-primary">{!productData ? 'Add New Product' : 'Edit Product'}</h2>
             <div className="flex justify-end space-x-4">
                 <button onClick={onCancel} disabled={isSaving || isUploadingMedia} className="px-6 py-2 rounded-md bg-gray-600 hover:bg-gray-500 text-text-primary font-semibold transition-colors disabled:opacity-50 hidden sm:block">Cancel</button>
                 <button onClick={handleSave} disabled={isSaving || isUploadingMedia} className="px-6 py-2 rounded-md bg-brand-primary hover:bg-brand-secondary text-white font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
@@ -311,22 +384,22 @@ const EditProductModal: React.FC<EditProductModalProps> = ({ product, allProduct
         <div className="sm:hidden flex border-b border-gray-700">
             <TabButton tab="details">Details</TabButton>
             <TabButton tab="recipe">Recipe</TabButton>
-            <TabButton tab="image">Image</TabButton>
+            {isForSale && <TabButton tab="image">Image</TabButton>}
         </div>
 
         {/* Content */}
         <div className="flex-grow p-4 sm:p-6 overflow-hidden">
             <div className="h-full overflow-y-auto">
                 {/* Desktop Layout */}
-                <div className="hidden sm:grid sm:grid-cols-1 lg:grid-cols-2 gap-x-8 h-full">
-                    <div className="space-y-6 overflow-y-auto pr-4">{FormDetails}{FormRecipe}</div>
-                    <div className="overflow-y-auto flex flex-col">{FormImage}</div>
+                <div className={`hidden sm:grid ${isForSale ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-x-8 h-full`}>
+                    <div className={`space-y-6 overflow-y-auto ${isForSale ? 'pr-4' : ''}`}>{FormDetails}{FormRecipe}</div>
+                    {isForSale && <div className="overflow-y-auto flex flex-col">{FormImage}</div>}
                 </div>
                 {/* Mobile Layout */}
                 <div className="sm:hidden h-full">
                     {activeTab === 'details' && FormDetails}
                     {activeTab === 'recipe' && FormRecipe}
-                    {activeTab === 'image' && <div className="h-full">{FormImage}</div>}
+                    {isForSale && activeTab === 'image' && <div className="h-full">{FormImage}</div>}
                 </div>
             </div>
         </div>

@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface SchemaUpdateGuideProps {
@@ -29,31 +28,20 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Database Migration Script v11 to v12 (Intermediary Products)
--- This non-destructive script updates your schema to support multi-level recipes.
+-- Danum POS - Database Migration Script to v14 (Restock Logic)
+-- This non-destructive script updates your schema to support automatic ingredient deduction when restocking preparations.
 
--- Section 1: Modify recipe table to support products as ingredients
-DO $$
-BEGIN
-    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'product_ingredients') THEN
-        ALTER TABLE public.product_ingredients RENAME TO product_recipe_items;
-        ALTER TABLE public.product_recipe_items RENAME CONSTRAINT product_ingredients_pkey TO product_recipe_items_pkey;
-        ALTER TABLE public.product_recipe_items DROP CONSTRAINT product_recipe_items_pkey;
-        ALTER TABLE public.product_recipe_items ADD COLUMN id BIGSERIAL PRIMARY KEY;
-        ALTER TABLE public.product_recipe_items ADD COLUMN sub_product_id BIGINT NULL REFERENCES public.products(id) ON DELETE CASCADE;
-        ALTER TABLE public.product_recipe_items ALTER COLUMN ingredient_id DROP NOT NULL;
-        ALTER TABLE public.product_recipe_items ADD CONSTRAINT one_recipe_item_type_check CHECK ((ingredient_id IS NOT NULL AND sub_product_id IS NULL) OR (ingredient_id IS NULL AND sub_product_id IS NOT NULL));
-        ALTER TABLE public.product_recipe_items ADD CONSTRAINT unique_ingredient_per_product UNIQUE (product_id, ingredient_id);
-        ALTER TABLE public.product_recipe_items ADD CONSTRAINT unique_subproduct_per_product UNIQUE (product_id, sub_product_id);
-    END IF;
-END;
-$$;
+-- Section 1: Add new columns to the products table (if not already present from v13)
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_for_sale BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_level NUMERIC;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_unit TEXT;
 
+-- Section 2: Update database functions to handle new logic
 
--- Section 2: Update database functions to handle the new structure
+-- Ensure get_products_with_categories is up-to-date
 DROP FUNCTION IF EXISTS public.get_products_with_categories();
 CREATE OR REPLACE FUNCTION public.get_products_with_categories()
-RETURNS TABLE(id bigint, name text, price numeric, image_url text, categories text[], recipe jsonb)
+RETURNS TABLE(id bigint, name text, price numeric, image_url text, categories text[], recipe jsonb, is_for_sale boolean, stock_level numeric, stock_unit text)
 LANGUAGE sql STABLE SECURITY DEFINER AS $$
   SELECT
     p.id, p.name, p.price, p.image_url,
@@ -62,21 +50,9 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
       (SELECT jsonb_agg(
         CASE
           WHEN pri.ingredient_id IS NOT NULL THEN
-            jsonb_build_object(
-              'type', 'ingredient',
-              'ingredientId', pri.ingredient_id,
-              'ingredientName', i.name,
-              'quantity', pri.quantity,
-              'unit', pri.unit
-            )
+            jsonb_build_object( 'type', 'ingredient', 'ingredientId', pri.ingredient_id, 'ingredientName', i.name, 'quantity', pri.quantity, 'unit', pri.unit )
           WHEN pri.sub_product_id IS NOT NULL THEN
-            jsonb_build_object(
-              'type', 'product',
-              'productId', pri.sub_product_id,
-              'productName', sub_p.name,
-              'quantity', pri.quantity,
-              'unit', pri.unit
-            )
+            jsonb_build_object( 'type', 'product', 'productId', pri.sub_product_id, 'productName', sub_p.name, 'quantity', pri.quantity, 'unit', pri.unit )
         END
       )
       FROM public.product_recipe_items pri
@@ -84,88 +60,87 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
       LEFT JOIN public.products sub_p ON pri.sub_product_id = sub_p.id
       WHERE pri.product_id = p.id),
       '[]'::jsonb
-    ) as recipe
+    ) as recipe,
+    p.is_for_sale,
+    p.stock_level,
+    p.stock_unit
   FROM public.products p ORDER BY p.name;
 $$;
 
-DROP FUNCTION IF EXISTS public.set_product_recipe(bigint, jsonb);
-CREATE OR REPLACE FUNCTION public.set_product_recipe(p_product_id bigint, p_recipe jsonb)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-    recipe_item jsonb;
-    v_ingredient_id bigint;
-    v_sub_product_id bigint;
-BEGIN
-    DELETE FROM public.product_recipe_items WHERE product_id = p_product_id;
-    IF jsonb_array_length(p_recipe) > 0 THEN
-        FOR recipe_item IN SELECT * FROM jsonb_array_elements(p_recipe) LOOP
-            v_ingredient_id := (recipe_item->>'ingredientId')::bigint;
-            v_sub_product_id := (recipe_item->>'productId')::bigint;
-            INSERT INTO public.product_recipe_items (product_id, ingredient_id, sub_product_id, quantity, unit)
-            VALUES (p_product_id, v_ingredient_id, v_sub_product_id, (recipe_item->>'quantity')::numeric, recipe_item->>'unit');
-        END LOOP;
-    END IF;
-END;
-$$;
-
+-- Ensure create_order is up-to-date
 DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb, uuid);
 CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-    v_order_id uuid;
-    order_item jsonb;
-    final_deductions RECORD;
-    v_stock_unit text;
-    v_conversion_factor numeric;
-    v_deduction_amount numeric;
+    v_order_id uuid; order_item jsonb; v_product_deduction RECORD; v_ingredient_deduction RECORD;
+    v_conversion_factor numeric; v_deduction_amount numeric; v_stock_unit text;
 BEGIN
     INSERT INTO public.orders (total, user_id) VALUES (p_total, p_user_id) RETURNING id INTO v_order_id;
     FOR order_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
         INSERT INTO public.order_items (order_id, product_id, quantity, price)
         VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric);
     END LOOP;
-    FOR final_deductions IN
-        WITH RECURSIVE bill_of_materials AS (
-            SELECT
-                (p_items_json->>'product_id')::bigint as root_product_id,
-                pri.sub_product_id,
-                pri.ingredient_id,
-                (p_items_json->>'quantity')::numeric * pri.quantity as total_quantity,
-                pri.unit,
-                1 as level
-            FROM jsonb_array_elements(p_items) AS p_items_json
-            JOIN public.product_recipe_items AS pri ON pri.product_id = (p_items_json->>'product_id')::bigint
+    FOR v_product_deduction IN
+        WITH RECURSIVE bom(product_id, quantity, level) AS (
+            SELECT (item->>'product_id')::bigint, (item->>'quantity')::numeric, 0 FROM jsonb_array_elements(p_items) as item
             UNION ALL
-            SELECT
-                bom.root_product_id,
-                pri.sub_product_id,
-                pri.ingredient_id,
-                bom.total_quantity * pri.quantity as total_quantity,
-                pri.unit,
-                bom.level + 1
-            FROM bill_of_materials bom
-            JOIN public.product_recipe_items pri ON pri.product_id = bom.sub_product_id
-            WHERE bom.sub_product_id IS NOT NULL AND bom.level < 10
+            SELECT pri.sub_product_id, bom.quantity * pri.quantity, bom.level + 1
+            FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
+            WHERE p.stock_level IS NULL AND pri.sub_product_id IS NOT NULL AND bom.level < 10
         )
-        SELECT
-            bom.ingredient_id,
-            bom.unit,
-            SUM(bom.total_quantity) as quantity_to_deduct
-        FROM bill_of_materials bom
-        WHERE bom.ingredient_id IS NOT NULL
-        GROUP BY bom.ingredient_id, bom.unit
+        SELECT b.product_id, SUM(b.quantity) as total_quantity FROM bom b JOIN public.products p ON p.id = b.product_id WHERE p.stock_level IS NOT NULL GROUP BY b.product_id
     LOOP
-        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = final_deductions.ingredient_id;
-        v_conversion_factor := public.get_conversion_factor(final_deductions.unit, v_stock_unit, final_deductions.ingredient_id);
-        v_deduction_amount := final_deductions.quantity_to_deduct * v_conversion_factor;
-        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = final_deductions.ingredient_id;
+        UPDATE public.products SET stock_level = stock_level - v_product_deduction.total_quantity WHERE id = v_product_deduction.product_id;
+    END LOOP;
+    FOR v_ingredient_deduction IN
+        WITH RECURSIVE bom(product_id, quantity, level) AS (
+            SELECT (item->>'product_id')::bigint, (item->>'quantity')::numeric, 0 FROM jsonb_array_elements(p_items) as item
+            UNION ALL
+            SELECT pri.sub_product_id, bom.quantity * pri.quantity, bom.level + 1
+            FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
+            WHERE p.stock_level IS NULL AND pri.sub_product_id IS NOT NULL AND bom.level < 10
+        )
+        SELECT pri.ingredient_id, pri.unit, SUM(bom.quantity * pri.quantity) as total_quantity
+        FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
+        WHERE p.stock_level IS NULL AND pri.ingredient_id IS NOT NULL
+        GROUP BY pri.ingredient_id, pri.unit
+    LOOP
+        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = v_ingredient_deduction.ingredient_id;
+        v_conversion_factor := public.get_conversion_factor(v_ingredient_deduction.unit, v_stock_unit, v_ingredient_deduction.ingredient_id);
+        v_deduction_amount := v_ingredient_deduction.total_quantity * v_conversion_factor;
+        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = v_ingredient_deduction.ingredient_id;
     END LOOP;
 END;
 $$;
 
+-- NEW: Function to restock preparations and deduct ingredients.
+CREATE OR REPLACE FUNCTION public.restock_preparation(p_product_id bigint, p_quantity_to_add numeric)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+    recipe_item RECORD;
+    v_conversion_factor numeric;
+    v_deduction_amount numeric;
+    v_stock_unit text;
+BEGIN
+    -- Step 1: Increase the stock of the preparation itself
+    UPDATE public.products SET stock_level = stock_level + p_quantity_to_add WHERE id = p_product_id;
+
+    -- Step 2: Decrease the stock of the raw ingredients used in its recipe
+    FOR recipe_item IN
+        SELECT pri.ingredient_id, pri.quantity, pri.unit
+        FROM public.product_recipe_items pri
+        WHERE pri.product_id = p_product_id AND pri.ingredient_id IS NOT NULL
+    LOOP
+        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id;
+        v_conversion_factor := public.get_conversion_factor(recipe_item.unit, v_stock_unit, recipe_item.ingredient_id);
+        v_deduction_amount := recipe_item.quantity * p_quantity_to_add * v_conversion_factor;
+        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id;
+    END LOOP;
+END;
+$$;
 
 -- Section 3: Schema Versioning
-INSERT INTO public.schema_migrations (version) VALUES (12) ON CONFLICT (version) DO UPDATE SET migrated_at = now();
+INSERT INTO public.schema_migrations (version) VALUES (14) ON CONFLICT (version) DO UPDATE SET migrated_at = now(), version = 14;
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -175,7 +150,7 @@ INSERT INTO public.schema_migrations (version) VALUES (12) ON CONFLICT (version)
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-text-primary">Database Update Required</h1>
         <p className="text-text-secondary mt-2">
-          Your database schema is out of date and needs to be updated to v12 for multi-level recipe support.
+          Your database schema is out of date and needs to be updated to v14 for automatic inventory deduction.
         </p>
       </div>
       <div className="space-y-6">
@@ -183,7 +158,7 @@ INSERT INTO public.schema_migrations (version) VALUES (12) ON CONFLICT (version)
             <h2 className="text-lg font-semibold text-text-primary mb-2">Instructions</h2>
             <ol className="list-decimal list-inside space-y-4 text-text-secondary bg-surface-main p-4 rounded-lg">
                 <li>
-                  <strong>This is a safe, non-destructive operation.</strong> The script below will not delete any of your existing data. It just updates tables and functions.
+                  <strong>This is a safe, non-destructive operation.</strong> The script below will not delete any of your existing data. It just adds new logic and updates functions.
                 </li>
                 <li>
                     <strong>Copy the SQL script</strong> provided below. This script is idempotent, meaning it's safe to run multiple times.
@@ -201,7 +176,7 @@ INSERT INTO public.schema_migrations (version) VALUES (12) ON CONFLICT (version)
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (v11 to v12)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (to v14)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

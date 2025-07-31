@@ -1,3 +1,4 @@
+
 import { Product } from '../domain/entities';
 import { IProductRepository } from '../domain/ports';
 import { seedData } from './seed';
@@ -8,10 +9,12 @@ import { seedData } from './seed';
 export class LocalProductRepository implements IProductRepository {
   async getProducts(): Promise<Product[]> {
     // Simulate the async nature of a real data fetch
-    // Add the required 'recipe' property to match the Product entity
     const products: Product[] = seedData.map(p => ({
         ...p,
         recipe: [], // Add empty recipe array
+        isForSale: true,
+        stockLevel: null,
+        stockUnit: null,
     }));
     return Promise.resolve(products);
   }
@@ -57,6 +60,11 @@ export class LocalProductRepository implements IProductRepository {
 
   async mergeCategories(sourceCategory: string, destinationCategory: string): Promise<void> {
     console.warn(`Attempted to merge category ${sourceCategory} into ${destinationCategory} in Demo Mode. This change will not be persisted.`);
+    return Promise.resolve();
+  }
+  
+  async restockPreparation(productId: number, quantityToAdd: number): Promise<void> {
+    console.warn(`Attempted to restock product with ID ${productId} in Demo Mode. This change will not be persisted.`);
     return Promise.resolve();
   }
 }

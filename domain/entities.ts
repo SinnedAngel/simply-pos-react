@@ -34,6 +34,9 @@ export interface Product {
   imageUrl: string;
   categories: string[];
   recipe: RecipeItem[];
+  isForSale: boolean;
+  stockLevel: number | null;
+  stockUnit: string | null;
 }
 
 export interface OrderItem extends Product {

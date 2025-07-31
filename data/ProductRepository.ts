@@ -30,6 +30,9 @@ export class ProductRepository implements IProductRepository {
       imageUrl: p.image_url,
       categories: p.categories || [],
       recipe: p.recipe || [],
+      isForSale: p.is_for_sale,
+      stockLevel: p.stock_level,
+      stockUnit: p.stock_unit,
     }));
   }
 
@@ -78,12 +81,15 @@ export class ProductRepository implements IProductRepository {
   }
 
   async updateProduct(product: Product): Promise<Product> {
-    // 1. Update the product details in the 'products' table.
     const productUpdate: Database['public']['Tables']['products']['Update'] = {
         name: product.name,
         price: product.price,
         image_url: product.imageUrl,
+        is_for_sale: product.isForSale,
+        stock_level: product.stockLevel,
+        stock_unit: product.stockUnit,
     };
+    // 1. Update the product details in the 'products' table.
     const { error: productError } = await this.supabase
       .from('products')
       .update(productUpdate)
@@ -142,6 +148,9 @@ export class ProductRepository implements IProductRepository {
       name: productData.name,
       price: productData.price,
       image_url: productData.imageUrl,
+      is_for_sale: productData.isForSale,
+      stock_level: productData.stockLevel,
+      stock_unit: productData.stockUnit,
     };
 
     const { error: insertError } = await this.supabase
@@ -213,6 +222,18 @@ export class ProductRepository implements IProductRepository {
     if (error) {
       console.error('Error merging categories:', error);
       throw new Error(`Failed to merge categories: ${error.message}`);
+    }
+  }
+
+  async restockPreparation(productId: number, quantityToAdd: number): Promise<void> {
+    const { error } = await this.supabase.rpc('restock_preparation', {
+        p_product_id: productId,
+        p_quantity_to_add: quantityToAdd,
+    });
+
+    if (error) {
+        console.error('Error restocking preparation:', error);
+        throw new Error(`Failed to restock preparation: ${error.message}`);
     }
   }
 }
