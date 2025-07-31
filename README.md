@@ -1,14 +1,12 @@
-# Run and deploy your AI Studio app
+# Danum POS
+A simple POS application for Danum Coffee Shop
 
-This contains everything you need to run your app locally.
+## Features
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- Login
+- Point of Sales
+- Sales reporting
+- Manage ingredients stock
+- Manage menus
+- Convertion tables
+- Manage users and roles
