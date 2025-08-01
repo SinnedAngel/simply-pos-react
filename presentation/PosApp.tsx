@@ -106,6 +106,7 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
     try {
         await salesUseCases.createOrder(order, session.id);
         clearOrder();
+        await refetch(); // Refetch products to update stock levels
         setCheckoutMessage({ type: 'success', text: `Checkout successful! Total: Rp ${orderTotal.toLocaleString('id-ID')}`});
         setIsOrderSummaryVisible(false); // Close mobile modal on success
         setTimeout(() => setCheckoutMessage(null), 4000);
@@ -128,8 +129,8 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
         // This is data for a new product
         await productUseCases.createProduct(productData);
       }
-      setEditingProduct(null); // Close modal on success
       await refetch(); // Refresh product list to show changes
+      setEditingProduct(null); // Close modal on success
     } catch (err) {
       // In a real app, you'd show a toast notification here
       console.error("Failed to save product:", err);

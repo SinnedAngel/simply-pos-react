@@ -100,8 +100,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ useCases 
   const handleSaveUser = async (updatedUser: Pick<ListedUser, 'id' | 'username' | 'role'>) => {
     try {
         await useCases.updateUser(updatedUser);
+        await fetchData(); // Refresh list before closing modal
         setUserToEdit(null);
-        await fetchData(); // Refresh list
         setListMessage({type: 'success', text: `Successfully updated user "${updatedUser.username}"!`});
         setTimeout(() => setListMessage(null), 4000);
     } catch (err) {
@@ -128,8 +128,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ useCases 
     const deletedUserName = userToDelete.username;
     try {
         await useCases.deleteUser(userToDelete.id);
+        await fetchData(); // Refresh list before closing modal
         setUserToDelete(null);
-        await fetchData(); // Refresh list
         setListMessage({ type: 'success', text: `User "${deletedUserName}" was deleted.`});
         setTimeout(() => setListMessage(null), 4000);
     } catch(err) {
