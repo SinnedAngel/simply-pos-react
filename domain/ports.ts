@@ -1,4 +1,4 @@
-import { UserSession, Product, StoredImage, Role, ListedUser, Order, SaleReport, Ingredient, UnitConversion, OrderLogItem } from './entities';
+import { UserSession, Product, StoredImage, Role, ListedUser, Order, SaleReport, Ingredient, UnitConversion, OrderLogItem, OpenOrder } from './entities';
 
 // --- APPLICATION PORTS (Interfaces) ---
 // These interfaces define the contracts for dependencies that live in outer layers (e.g., data, services).
@@ -47,6 +47,10 @@ export interface ISalesRepository {
     createOrder(order: Order, userId: string): Promise<void>;
     getSalesReport(startDate: string, endDate: string): Promise<SaleReport>;
     getOrderLog(startDate: string, endDate: string): Promise<OrderLogItem[]>;
+    // Open Table Management
+    getOpenOrders(): Promise<OpenOrder[]>;
+    saveOpenOrder(tableNumber: string, order: Order, userId: string): Promise<void>;
+    closeOpenOrder(tableNumber: string): Promise<void>;
 }
 
 export interface IIngredientRepository {

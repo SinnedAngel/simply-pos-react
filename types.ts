@@ -97,6 +97,12 @@ export type RpcOrderLogItem = {
   items: RpcOrderLogItemProduct[];
 };
 
+// Type for open orders returned by the 'get_all_open_orders' RPC
+export type RpcOpenOrder = {
+  table_number: string;
+  order_data: any; // Supabase returns jsonb as `any`
+};
+
 
 export interface Database {
   public: {
@@ -428,6 +434,41 @@ export interface Database {
           }
         ];
       };
+      open_orders: {
+        Row: {
+          id: string;
+          table_number: string;
+          order_data: any;
+          user_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          table_number: string;
+          order_data: any;
+          user_id: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          table_number?: string;
+          order_data?: any;
+          user_id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "open_orders_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -649,6 +690,25 @@ export interface Database {
       delete_conversion: {
         Args: {
             p_id: number;
+        };
+        Returns: void;
+      };
+       // Open Order Functions
+      get_all_open_orders: {
+        Args: Record<string, unknown>;
+        Returns: any;
+      };
+      save_open_order: {
+        Args: {
+          p_order_data: any;
+          p_table_number: string;
+          p_user_id: string;
+        };
+        Returns: void;
+      };
+      close_open_order: {
+        Args: {
+          p_table_number: string;
         };
         Returns: void;
       };

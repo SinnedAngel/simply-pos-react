@@ -28,119 +28,70 @@ const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
 const SchemaUpdateGuide: React.FC<SchemaUpdateGuideProps> = ({ onRetry }) => {
   
   const setupSQL = `
--- Danum POS - Database Migration Script to v14 (Restock Logic)
--- This non-destructive script updates your schema to support automatic ingredient deduction when restocking preparations.
+-- Danum POS - Database Migration Script to v17 (Open Orders Feature Fix)
+-- This is a comprehensive, non-destructive script to ensure the open orders feature is correctly installed.
+-- It can be run safely on any previous schema version to fix missing tables or functions.
 
--- Section 1: Add new columns to the products table (if not already present from v13)
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_for_sale BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_level NUMERIC;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_unit TEXT;
+-- Section 1: Ensure the open_orders table and its trigger exist.
+CREATE TABLE IF NOT EXISTS public.open_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_number text NOT NULL UNIQUE,
+  order_data jsonb NOT NULL,
+  user_id uuid NOT NULL REFERENCES public.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 
--- Section 2: Update database functions to handle new logic
+CREATE OR REPLACE FUNCTION public.set_current_timestamp_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- Ensure get_products_with_categories is up-to-date
-DROP FUNCTION IF EXISTS public.get_products_with_categories();
-CREATE OR REPLACE FUNCTION public.get_products_with_categories()
-RETURNS TABLE(id bigint, name text, price numeric, image_url text, categories text[], recipe jsonb, is_for_sale boolean, stock_level numeric, stock_unit text)
+DROP TRIGGER IF EXISTS set_open_orders_updated_at ON public.open_orders;
+CREATE TRIGGER set_open_orders_updated_at
+BEFORE UPDATE ON public.open_orders
+FOR EACH ROW EXECUTE FUNCTION public.set_current_timestamp_updated_at();
+
+-- Section 2: Recreate all open order functions with the correct signatures.
+CREATE OR REPLACE FUNCTION public.get_all_open_orders()
+RETURNS TABLE(table_number text, order_data jsonb)
 LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT
-    p.id, p.name, p.price, p.image_url,
-    COALESCE((SELECT array_agg(c.name) FROM public.product_categories pc JOIN public.categories c ON pc.category_id = c.id WHERE pc.product_id = p.id), '{}'::text[]) as categories,
-    COALESCE(
-      (SELECT jsonb_agg(
-        CASE
-          WHEN pri.ingredient_id IS NOT NULL THEN
-            jsonb_build_object( 'type', 'ingredient', 'ingredientId', pri.ingredient_id, 'ingredientName', i.name, 'quantity', pri.quantity, 'unit', pri.unit )
-          WHEN pri.sub_product_id IS NOT NULL THEN
-            jsonb_build_object( 'type', 'product', 'productId', pri.sub_product_id, 'productName', sub_p.name, 'quantity', pri.quantity, 'unit', pri.unit )
-        END
-      )
-      FROM public.product_recipe_items pri
-      LEFT JOIN public.ingredients i ON pri.ingredient_id = i.id
-      LEFT JOIN public.products sub_p ON pri.sub_product_id = sub_p.id
-      WHERE pri.product_id = p.id),
-      '[]'::jsonb
-    ) as recipe,
-    p.is_for_sale,
-    p.stock_level,
-    p.stock_unit
-  FROM public.products p ORDER BY p.name;
+  SELECT o.table_number, o.order_data FROM public.open_orders o ORDER BY o.table_number;
 $$;
 
--- Ensure create_order is up-to-date
-DROP FUNCTION IF EXISTS public.create_order(numeric, jsonb, uuid);
-CREATE OR REPLACE FUNCTION public.create_order(p_total numeric, p_items jsonb, p_user_id uuid)
+CREATE OR REPLACE FUNCTION public.save_open_order(p_order_data jsonb, p_table_number text, p_user_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-    v_order_id uuid; order_item jsonb; v_product_deduction RECORD; v_ingredient_deduction RECORD;
-    v_conversion_factor numeric; v_deduction_amount numeric; v_stock_unit text;
 BEGIN
-    INSERT INTO public.orders (total, user_id) VALUES (p_total, p_user_id) RETURNING id INTO v_order_id;
-    FOR order_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
-        INSERT INTO public.order_items (order_id, product_id, quantity, price)
-        VALUES (v_order_id, (order_item->>'product_id')::bigint, (order_item->>'quantity')::integer, (order_item->>'price')::numeric);
-    END LOOP;
-    FOR v_product_deduction IN
-        WITH RECURSIVE bom(product_id, quantity, level) AS (
-            SELECT (item->>'product_id')::bigint, (item->>'quantity')::numeric, 0 FROM jsonb_array_elements(p_items) as item
-            UNION ALL
-            SELECT pri.sub_product_id, bom.quantity * pri.quantity, bom.level + 1
-            FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
-            WHERE p.stock_level IS NULL AND pri.sub_product_id IS NOT NULL AND bom.level < 10
-        )
-        SELECT b.product_id, SUM(b.quantity) as total_quantity FROM bom b JOIN public.products p ON p.id = b.product_id WHERE p.stock_level IS NOT NULL GROUP BY b.product_id
-    LOOP
-        UPDATE public.products SET stock_level = stock_level - v_product_deduction.total_quantity WHERE id = v_product_deduction.product_id;
-    END LOOP;
-    FOR v_ingredient_deduction IN
-        WITH RECURSIVE bom(product_id, quantity, level) AS (
-            SELECT (item->>'product_id')::bigint, (item->>'quantity')::numeric, 0 FROM jsonb_array_elements(p_items) as item
-            UNION ALL
-            SELECT pri.sub_product_id, bom.quantity * pri.quantity, bom.level + 1
-            FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
-            WHERE p.stock_level IS NULL AND pri.sub_product_id IS NOT NULL AND bom.level < 10
-        )
-        SELECT pri.ingredient_id, pri.unit, SUM(bom.quantity * pri.quantity) as total_quantity
-        FROM bom JOIN public.products p ON p.id = bom.product_id JOIN public.product_recipe_items pri ON pri.product_id = p.id
-        WHERE p.stock_level IS NULL AND pri.ingredient_id IS NOT NULL
-        GROUP BY pri.ingredient_id, pri.unit
-    LOOP
-        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = v_ingredient_deduction.ingredient_id;
-        v_conversion_factor := public.get_conversion_factor(v_ingredient_deduction.unit, v_stock_unit, v_ingredient_deduction.ingredient_id);
-        v_deduction_amount := v_ingredient_deduction.total_quantity * v_conversion_factor;
-        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = v_ingredient_deduction.ingredient_id;
-    END LOOP;
+  INSERT INTO public.open_orders (table_number, order_data, user_id)
+  VALUES (p_table_number, p_order_data, p_user_id)
+  ON CONFLICT (table_number)
+  DO UPDATE SET
+    order_data = EXCLUDED.order_data,
+    user_id = EXCLUDED.user_id,
+    updated_at = now();
 END;
 $$;
 
--- NEW: Function to restock preparations and deduct ingredients.
-CREATE OR REPLACE FUNCTION public.restock_preparation(p_product_id bigint, p_quantity_to_add numeric)
+CREATE OR REPLACE FUNCTION public.close_open_order(p_table_number text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-    recipe_item RECORD;
-    v_conversion_factor numeric;
-    v_deduction_amount numeric;
-    v_stock_unit text;
 BEGIN
-    -- Step 1: Increase the stock of the preparation itself
-    UPDATE public.products SET stock_level = stock_level + p_quantity_to_add WHERE id = p_product_id;
-
-    -- Step 2: Decrease the stock of the raw ingredients used in its recipe
-    FOR recipe_item IN
-        SELECT pri.ingredient_id, pri.quantity, pri.unit
-        FROM public.product_recipe_items pri
-        WHERE pri.product_id = p_product_id AND pri.ingredient_id IS NOT NULL
-    LOOP
-        SELECT stock_unit INTO v_stock_unit FROM public.ingredients WHERE id = recipe_item.ingredient_id;
-        v_conversion_factor := public.get_conversion_factor(recipe_item.unit, v_stock_unit, recipe_item.ingredient_id);
-        v_deduction_amount := recipe_item.quantity * p_quantity_to_add * v_conversion_factor;
-        UPDATE public.ingredients SET stock_level = stock_level - v_deduction_amount WHERE id = recipe_item.ingredient_id;
-    END LOOP;
+  DELETE FROM public.open_orders WHERE table_number = p_table_number;
 END;
 $$;
 
--- Section 3: Schema Versioning
-INSERT INTO public.schema_migrations (version) VALUES (14) ON CONFLICT (version) DO UPDATE SET migrated_at = now(), version = 14;
+-- Section 3: Ensure RLS and policies are correctly set.
+ALTER TABLE public.open_orders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow full access to open orders" ON public.open_orders;
+CREATE POLICY "Allow full access to open orders" ON public.open_orders
+FOR ALL
+USING (true)
+WITH CHECK (true);
+
+-- Section 4: Update schema version to 17.
+INSERT INTO public.schema_migrations (version) VALUES (17) ON CONFLICT (version) DO UPDATE SET migrated_at = now(), version = 17;
 `.trim();
   
   const supabaseSqlEditorUrl = "https://supabase.com/dashboard/project/_/sql/new";
@@ -150,7 +101,7 @@ INSERT INTO public.schema_migrations (version) VALUES (14) ON CONFLICT (version)
       <div className="text-center mb-6">
         <h1 className="text-3xl font-bold text-text-primary">Database Update Required</h1>
         <p className="text-text-secondary mt-2">
-          Your database schema is out of date and needs to be updated to v14 for automatic inventory deduction.
+          Your database schema is out of date and needs an update to v17 to apply critical fixes.
         </p>
       </div>
       <div className="space-y-6">
@@ -158,7 +109,7 @@ INSERT INTO public.schema_migrations (version) VALUES (14) ON CONFLICT (version)
             <h2 className="text-lg font-semibold text-text-primary mb-2">Instructions</h2>
             <ol className="list-decimal list-inside space-y-4 text-text-secondary bg-surface-main p-4 rounded-lg">
                 <li>
-                  <strong>This is a safe, non-destructive operation.</strong> The script below will not delete any of your existing data. It just adds new logic and updates functions.
+                  <strong>This is a safe, non-destructive operation.</strong> The script below will not delete any of your existing data. It will create missing tables and functions to fix the application.
                 </li>
                 <li>
                     <strong>Copy the SQL script</strong> provided below. This script is idempotent, meaning it's safe to run multiple times.
@@ -176,7 +127,7 @@ INSERT INTO public.schema_migrations (version) VALUES (14) ON CONFLICT (version)
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (to v14)</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Complete Update Script (to v17)</h2>
           <CodeBlock code={setupSQL} />
         </div>
          <a 

@@ -1,7 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database, OrderItemParam, RpcOrderLogItem, RpcSaleReport } from '../types';
+import { Database, OrderItemParam, RpcOrderLogItem, RpcOpenOrder, RpcSaleReport } from '../types';
 import { ISalesRepository } from '../domain/ports';
-import { Order, OrderLogItem, SaleReport } from '../domain/entities';
+import { Order, OrderLogItem, OpenOrder, SaleReport } from '../domain/entities';
 
 // --- ADAPTER: Sales Repository ---
 // This class implements the ISalesRepository port. It adapts our data source (Supabase)
@@ -89,5 +89,45 @@ export class SalesRepository implements ISalesRepository {
             price: p.price,
         })),
     }));
+  }
+
+  // --- Open Orders Methods ---
+  async getOpenOrders(): Promise<OpenOrder[]> {
+    const { data, error } = await this.supabase.rpc('get_all_open_orders');
+    if (error) {
+        console.error("Error fetching open orders:", error);
+        throw new Error(`Failed to fetch open orders: ${error.message}`);
+    }
+    if (!data) return [];
+
+    const openOrderData = data as unknown as RpcOpenOrder[];
+
+    return openOrderData.map(item => ({
+        tableNumber: item.table_number,
+        order: item.order_data as Order, // Trusting the DB to return valid Order JSON
+    }));
+  }
+
+  async saveOpenOrder(tableNumber: string, order: Order, userId: string): Promise<void> {
+      const { error } = await this.supabase.rpc('save_open_order', {
+          p_order_data: order as any, // Cast to any for Supabase JSONB
+          p_table_number: tableNumber,
+          p_user_id: userId,
+      });
+
+      if (error) {
+          console.error("Error saving open order:", error);
+          throw new Error(`Failed to save order for table ${tableNumber}: ${error.message}`);
+      }
+  }
+
+  async closeOpenOrder(tableNumber: string): Promise<void> {
+      const { error } = await this.supabase.rpc('close_open_order', {
+          p_table_number: tableNumber,
+      });
+      if (error) {
+          console.error("Error closing open order:", error);
+          throw new Error(`Failed to close order for table ${tableNumber}: ${error.message}`);
+      }
   }
 }

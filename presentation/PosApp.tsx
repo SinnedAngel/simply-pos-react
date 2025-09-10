@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { useProducts } from './hooks/useProducts';
 import { useOrder } from './hooks/useOrder';
+import { useOpenOrders } from './hooks/useOpenOrders';
 import Header from './components/Header';
 import ProductGrid from './components/ProductGrid';
 import OrderSummary from './components/OrderSummary';
@@ -20,7 +20,8 @@ import InventoryPage from './pages/InventoryPage';
 import ConversionManagementPage from './pages/ConversionManagementPage';
 import { ShoppingCartIcon } from './components/icons/ShoppingCartIcon';
 import { XIcon } from './components/icons/XIcon';
-
+import OpenTablesBar from './components/OpenTablesBar';
+import SaveToTableModal from './components/SaveToTableModal';
 
 interface PosAppProps {
   productUseCases: ProductUseCases;
@@ -39,7 +40,8 @@ type EditingProductState = Product | { mode: 'new'; defaults?: Partial<Omit<Prod
 
 function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, salesUseCases, inventoryUseCases, conversionUseCases, onSessionEnd }: PosAppProps) {
   const { products, categories, isLoading, error, isDbEmpty, schemaError, refetch } = useProducts(productUseCases);
-  const { order, addItem, removeItem, updateItemQuantity, clearOrder } = useOrder(orderUseCases);
+  const { order, addItem, removeItem, updateItemQuantity, clearOrder, setOrderState } = useOrder(orderUseCases);
+  const { openOrders, getOpenOrders, saveOpenOrder, closeOpenOrder } = useOpenOrders(salesUseCases);
 
   const [view, setView] = useState<AppView>('pos');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -49,6 +51,11 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
   const [session, setSession] = useState<UserSession | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [isOrderSummaryVisible, setIsOrderSummaryVisible] = useState(false);
+  
+  // Open Tables State
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [isSaveToTableModalOpen, setIsSaveToTableModalOpen] = useState(false);
+  const [itemToClear, setItemToClear] = useState<'order' | 'table' | null>(null);
 
 
   useEffect(() => {
@@ -60,6 +67,61 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
       setShowConfirmModal(true);
     }
   }, [isDbEmpty, view, authUseCases]);
+
+  const handleSelectTable = (tableNumber: string | null) => {
+    setSelectedTable(tableNumber);
+    if (tableNumber) {
+        const tableOrder = openOrders.find(o => o.tableNumber === tableNumber)?.order;
+        if (tableOrder) {
+            setOrderState(tableOrder);
+        }
+    } else {
+        clearOrder();
+    }
+  };
+
+  const handleSaveToTable = async (tableNumber: string) => {
+    if (!session?.id) return;
+    try {
+        await saveOpenOrder(tableNumber, order, session.id);
+        clearOrder();
+        setSelectedTable(null); // Return to general view
+        setIsSaveToTableModalOpen(false);
+    } catch (err) {
+        // re-throw for the modal to display
+        throw err;
+    }
+  };
+
+  const handleUpdateTable = async () => {
+    if (!selectedTable || !session?.id) return;
+    try {
+        await saveOpenOrder(selectedTable, order, session.id);
+        setCheckoutMessage({ type: 'success', text: `Table "${selectedTable}" updated successfully.` });
+        setTimeout(() => setCheckoutMessage(null), 4000);
+    } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+        setCheckoutMessage({ type: 'error', text: `Update failed: ${errorMessage}` });
+        setTimeout(() => setCheckoutMessage(null), 5000);
+    }
+  };
+  
+  const handleClear = () => {
+    if (selectedTable) {
+        setItemToClear('table');
+    } else if (order.items.length > 0) {
+        setItemToClear('order');
+    }
+  };
+  
+  const confirmClear = async () => {
+    if (itemToClear === 'table' && selectedTable) {
+        await closeOpenOrder(selectedTable);
+        setSelectedTable(null);
+    }
+    clearOrder();
+    setItemToClear(null);
+  };
 
 
   const handleSeedDatabase = async () => {
@@ -105,6 +167,12 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
     const orderTotal = order.total;
     try {
         await salesUseCases.createOrder(order, session.id);
+        
+        if (selectedTable) {
+            await closeOpenOrder(selectedTable);
+            setSelectedTable(null);
+        }
+
         clearOrder();
         await refetch(); // Refetch products to update stock levels
         setCheckoutMessage({ type: 'success', text: `Checkout successful! Total: Rp ${orderTotal.toLocaleString('id-ID')}`});
@@ -164,14 +232,19 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
     const canCreateSales = session?.permissions.includes('create_sales') ?? false;
 
     return (
-      <ProductGrid
-        products={products}
-        categories={categories}
-        onProductSelect={addItem}
-        onEditProduct={setEditingProduct}
-        canEditProducts={canEditProducts}
-        canAddToOrder={canCreateSales}
-      />
+      <div className="flex flex-col h-full">
+        <OpenTablesBar openOrders={openOrders} selectedTable={selectedTable} onSelectTable={handleSelectTable} />
+        <div className="flex-grow overflow-y-auto">
+            <ProductGrid
+                products={products}
+                categories={categories}
+                onProductSelect={addItem}
+                onEditProduct={setEditingProduct}
+                canEditProducts={canEditProducts}
+                canAddToOrder={canCreateSales}
+            />
+        </div>
+      </div>
     );
   };
   
@@ -217,6 +290,10 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
         onUpdateQuantity={updateItemQuantity}
         onCheckout={handleCheckout}
         canCheckout={canCreateSales}
+        selectedTable={selectedTable}
+        onSaveToTable={() => setIsSaveToTableModalOpen(true)}
+        onUpdateTable={handleUpdateTable}
+        onClear={handleClear}
     />
   );
 
@@ -235,7 +312,23 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
           onConfirm={handleSeedDatabase}
           onCancel={() => setShowConfirmModal(false)}
         />
-      )}
+       )}
+       {isSaveToTableModalOpen && (
+        <SaveToTableModal
+            onSave={handleSaveToTable}
+            onCancel={() => setIsSaveToTableModalOpen(false)}
+            openOrders={openOrders}
+        />
+       )}
+       {itemToClear && (
+        <ConfirmModal
+            title={itemToClear === 'table' ? `Clear Table "${selectedTable}"?` : 'Clear Order?'}
+            message={itemToClear === 'table' ? 'This will permanently delete this open order. This action cannot be undone.' : 'Are you sure you want to remove all items from the current order?'}
+            confirmText={itemToClear === 'table' ? 'Yes, Clear Table' : 'Yes, Clear Order'}
+            onConfirm={confirmClear}
+            onCancel={() => setItemToClear(null)}
+        />
+       )}
       {editingProduct !== null && (
         <EditProductModal
           product={editingProduct}

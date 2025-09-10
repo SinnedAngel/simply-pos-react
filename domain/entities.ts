@@ -50,6 +50,11 @@ export interface Order {
   total: number;
 }
 
+export interface OpenOrder {
+    tableNumber: string;
+    order: Order;
+}
+
 export interface UserSession {
   id: string;
   username: string;

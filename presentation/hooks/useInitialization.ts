@@ -39,7 +39,7 @@ export type UseCaseBundle = {
 };
 
 // This constant should be incremented whenever a breaking schema change is made.
-const LATEST_SCHEMA_VERSION = 14;
+const LATEST_SCHEMA_VERSION = 17;
 
 // A helper function to ensure a minimum time passes, for better UX
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

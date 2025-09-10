@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { Order, Product } from '../../domain/entities';
 import { OrderUseCases } from '../../domain/use-cases/OrderUseCases';
@@ -26,5 +25,17 @@ export const useOrder = (useCases: OrderUseCases) => {
     setOrder(newOrderState);
   }, [useCases]);
 
-  return { order, addItem, removeItem, updateItemQuantity, clearOrder };
+  const setOrderState = useCallback((newOrder: Order) => {
+      // This is a new function to directly set the order state from an external source (like an open table)
+      useCases.clearOrder(); // First clear internal state
+      newOrder.items.forEach(item => {
+          // Re-add items to ensure the internal state of the use case is consistent
+          for (let i = 0; i < item.quantity; i++) {
+              useCases.addItem(item);
+          }
+      });
+      setOrder(useCases.getState());
+  }, [useCases]);
+
+  return { order, addItem, removeItem, updateItemQuantity, clearOrder, setOrderState };
 };
