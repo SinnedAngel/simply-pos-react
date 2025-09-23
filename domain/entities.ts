@@ -103,6 +103,18 @@ export interface OrderLogItem {
   items: OrderLogItemProduct[];
 }
 
+export interface PurchaseLogItem {
+  id: number;
+  createdAt: string;
+  totalCost: number;
+  userName: string | null;
+  ingredientName: string;
+  quantityPurchased: number;
+  unit: string;
+  supplier: string | null;
+  notes: string | null;
+}
+
 export interface DailySale {
   date: string;
   total: number;
@@ -120,4 +132,7 @@ export interface SaleReport {
   avgOrderValue: number;
   dailySales: DailySale[];
   topProducts: TopProduct[];
+  totalExpenses: number;
+  netProfit: number;
+  dailyExpenses: DailySale[];
 }

@@ -20,8 +20,8 @@ export class ProductRepository implements IProductRepository {
 
     if (!data) return [];
     
-    // The data from rpc is now json, so we cast it.
-    const productsData = data as unknown as RpcProduct[];
+    // The data from rpc is now strongly typed
+    const productsData = data as RpcProduct[];
 
     return productsData.map((p) => ({
       id: p.id,

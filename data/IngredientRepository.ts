@@ -1,21 +1,35 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database, RpcIngredient } from '../types';
-import { Ingredient } from '../domain/entities';
+import { Ingredient, PurchaseLogItem } from '../domain/entities';
 import { IIngredientRepository } from '../domain/ports';
 
 // --- ADAPTER: Ingredient Repository ---
 // This class implements the IIngredientRepository port for inventory management.
 export class IngredientRepository implements IIngredientRepository {
   constructor(private supabase: SupabaseClient<Database>) {}
+  
+  private getErrorMessage(error: any, defaultMessage: string): string {
+    if (typeof error === 'object' && error !== null && error.message) {
+      let message = String(error.message);
+      if (error.details) {
+        message += ` Details: ${String(error.details)}`;
+      }
+      if (error.hint) {
+        message += ` Hint: ${String(error.hint)}`;
+      }
+      return message;
+    }
+    return defaultMessage;
+  }
 
   async getIngredients(): Promise<Ingredient[]> {
     const { data, error } = await this.supabase.rpc('get_all_ingredients');
     if (error) {
         console.error('Error fetching ingredients:', error);
-        throw new Error(`Failed to get ingredients: ${error.message}`);
+        throw new Error(`Failed to get ingredients: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
     
-    return ((data as unknown as RpcIngredient[]) ?? []).map((i: RpcIngredient) => ({
+    return ((data as RpcIngredient[]) ?? []).map((i: RpcIngredient) => ({
         id: i.id,
         name: i.name,
         stockLevel: i.stock_level,
@@ -34,7 +48,7 @@ export class IngredientRepository implements IIngredientRepository {
         throw new Error(`Ingredient "${name}" already exists.`);
       }
       console.error('Error creating ingredient:', error);
-      throw new Error(`Failed to create ingredient: ${error.message}`);
+      throw new Error(`Failed to create ingredient: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
     // We need to fetch the created ingredient to get its ID
     const { data: newIngredient, error: fetchError } = await this.supabase
@@ -68,7 +82,7 @@ export class IngredientRepository implements IIngredientRepository {
             throw new Error(`Ingredient name "${ingredient.name}" already exists.`);
         }
         console.error('Error updating ingredient:', error);
-        throw new Error(`Failed to update ingredient: ${error.message}`);
+        throw new Error(`Failed to update ingredient: ${this.getErrorMessage(error, 'Unknown error')}`);
       }
       return ingredient;
   }
@@ -77,7 +91,25 @@ export class IngredientRepository implements IIngredientRepository {
     const { error } = await this.supabase.rpc('delete_ingredient', { p_id: ingredientId });
     if (error) {
         console.error('Error deleting ingredient:', error);
-        throw new Error(`Failed to delete ingredient: ${error.message}`);
+        throw new Error(`Failed to delete ingredient: ${this.getErrorMessage(error, 'Unknown error')}`);
+    }
+  }
+
+  async logPurchase(data: Omit<PurchaseLogItem, 'id' | 'createdAt' | 'userName' | 'ingredientName'> & { ingredientId: number; userId: string; createdAt?: string; }): Promise<void> {
+    const { error } = await this.supabase.rpc('log_purchase', {
+      p_ingredient_id: data.ingredientId,
+      p_quantity: data.quantityPurchased,
+      p_unit: data.unit,
+      p_total_cost: data.totalCost,
+      p_user_id: data.userId,
+      p_supplier: data.supplier || undefined,
+      p_notes: data.notes || undefined,
+      p_created_at: data.createdAt || undefined,
+    });
+
+    if (error) {
+      console.error('Error logging purchase:', error);
+      throw new Error(`Failed to log purchase: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
   }
 }

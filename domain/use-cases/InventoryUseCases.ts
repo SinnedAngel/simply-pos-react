@@ -1,6 +1,5 @@
-
 import { IIngredientRepository } from '../ports';
-import { Ingredient } from '../entities';
+import { Ingredient, PurchaseLogItem } from '../entities';
 
 // --- USE CASE: Managing Inventory ---
 // This use case orchestrates all inventory-related logic.
@@ -36,5 +35,12 @@ export class InventoryUseCases {
       throw new Error('Ingredient ID is required for deletion.');
     }
     return this.ingredientRepository.deleteIngredient(ingredientId);
+  }
+
+  async logPurchase(purchaseData: Omit<PurchaseLogItem, 'id' | 'createdAt' | 'userName' | 'ingredientName'> & { ingredientId: number; userId: string; createdAt?: string; }): Promise<void> {
+    if (!purchaseData.ingredientId || purchaseData.quantityPurchased <= 0 || purchaseData.totalCost < 0 || !purchaseData.unit || !purchaseData.userId) {
+      throw new Error('Invalid purchase data. Please check all fields.');
+    }
+    return this.ingredientRepository.logPurchase(purchaseData);
   }
 }

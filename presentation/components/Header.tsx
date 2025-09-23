@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { UsersIcon } from './icons/UsersIcon';
 import { ShieldCheckIcon } from './icons/ShieldCheckIcon';
@@ -13,8 +12,9 @@ import { CogIcon } from './icons/CogIcon';
 import { HamburgerMenuIcon } from './icons/HamburgerMenuIcon';
 import { XIcon } from './icons/XIcon';
 import { UploadIcon } from './icons/UploadIcon';
+import { ArchiveIcon } from './icons/ArchiveIcon';
 
-type AppView = 'pos' | 'menu' | 'categories' | 'inventory' | 'conversions' | 'media' | 'accounts' | 'roles' | 'reporting';
+type AppView = 'pos' | 'menu' | 'categories' | 'inventory' | 'conversions' | 'media' | 'accounts' | 'roles' | 'reporting' | 'purchasing';
 
 interface HeaderProps {
   onLogout: () => void;
@@ -58,7 +58,7 @@ const MenuDropdown: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const isActive = ['menu', 'categories', 'inventory', 'conversions'].includes(currentView);
+  const isActive = ['menu', 'categories', 'inventory', 'conversions', 'purchasing'].includes(currentView);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -93,6 +93,7 @@ const MenuDropdown: React.FC<{
          {hasPermission('manage_menu') && (<button onClick={() => handleNavigate('menu')} className={`${mobileBaseClasses} ${currentView === 'menu' ? mobileActive : mobileInactive} ${hoverClass}`}> <MenuIcon className="w-5 h-5" /> Manage Products </button>)}
          {hasPermission('manage_categories') && (<button onClick={() => handleNavigate('categories')} className={`${mobileBaseClasses} ${currentView === 'categories' ? mobileActive : mobileInactive} ${hoverClass}`}><TagIcon className="w-5 h-5" /> Manage Categories</button>)}
          {hasPermission('manage_inventory') && (<button onClick={() => handleNavigate('inventory')} className={`${mobileBaseClasses} ${currentView === 'inventory' ? mobileActive : mobileInactive} ${hoverClass}`}><CubeIcon className="w-5 h-5" /> Manage Inventory</button>)}
+         {hasPermission('manage_purchases') && (<button onClick={() => handleNavigate('purchasing')} className={`${mobileBaseClasses} ${currentView === 'purchasing' ? mobileActive : mobileInactive} ${hoverClass}`}><ArchiveIcon className="w-5 h-5" /> Purchasing</button>)}
          {hasPermission('manage_conversions') && (<button onClick={() => handleNavigate('conversions')} className={`${mobileBaseClasses} ${currentView === 'conversions' ? mobileActive : mobileInactive} ${hoverClass}`}><ScaleIcon className="w-5 h-5" /> Manage Conversions</button>)}
       </div>
     );
@@ -118,6 +119,7 @@ const MenuDropdown: React.FC<{
           {hasPermission('manage_menu') && (<button onClick={() => handleNavigate('menu')} className={`${desktopBaseClasses} ${currentView === 'menu' ? desktopActive : desktopInactive} ${hoverClass}`}> <MenuIcon className="w-4 h-4" /> Manage Products </button>)}
           {hasPermission('manage_categories') && (<button onClick={() => handleNavigate('categories')} className={`${desktopBaseClasses} ${currentView === 'categories' ? desktopActive : desktopInactive} ${hoverClass}`}><TagIcon className="w-4 h-4" /> Manage Categories</button>)}
           {hasPermission('manage_inventory') && (<button onClick={() => handleNavigate('inventory')} className={`${desktopBaseClasses} ${currentView === 'inventory' ? desktopActive : desktopInactive} ${hoverClass}`}><CubeIcon className="w-4 h-4" /> Manage Inventory</button>)}
+          {hasPermission('manage_purchases') && (<button onClick={() => handleNavigate('purchasing')} className={`${desktopBaseClasses} ${currentView === 'purchasing' ? desktopActive : desktopInactive} ${hoverClass}`}><ArchiveIcon className="w-4 h-4" /> Purchasing</button>)}
           {hasPermission('manage_conversions') && (<button onClick={() => handleNavigate('conversions')} className={`${desktopBaseClasses} ${currentView === 'conversions' ? desktopActive : desktopInactive} ${hoverClass}`}><ScaleIcon className="w-4 h-4" /> Manage Conversions</button>)}
         </div>
       )}
@@ -202,7 +204,7 @@ const Header: React.FC<HeaderProps> = ({ onLogout, currentView, onNavigate, sess
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const hasPermission = (permission: string) => session?.permissions?.includes(permission) ?? false;
   
-  const canManageStore = ['manage_menu', 'manage_categories', 'manage_inventory', 'manage_conversions'].some(hasPermission);
+  const canManageStore = ['manage_menu', 'manage_categories', 'manage_inventory', 'manage_conversions', 'manage_purchases'].some(hasPermission);
   const canManageAdmin = ['manage_accounts', 'manage_roles'].some(hasPermission);
   
   const handleMobileNav = (view: AppView) => {

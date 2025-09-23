@@ -1,4 +1,4 @@
-import { Order, OrderLogItem, SaleReport, OpenOrder } from '../entities';
+import { Order, OrderLogItem, SaleReport, OpenOrder, PurchaseLogItem } from '../entities';
 import { ISalesRepository } from '../ports';
 
 // --- USE CASE: Managing Sales & Reporting ---
@@ -28,6 +28,13 @@ export class SalesUseCases {
       throw new Error('Start date and end date are required for the log.');
     }
     return this.salesRepository.getOrderLog(startDate, endDate);
+  }
+
+  async getPurchaseLog(startDate: string, endDate: string): Promise<PurchaseLogItem[]> {
+    if (!startDate || !endDate) {
+      throw new Error('Start date and end date are required for the log.');
+    }
+    return this.salesRepository.getPurchaseLog(startDate, endDate);
   }
 
   // --- Open Table Use Cases ---

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { AuthUseCases } from '../../domain/use-cases';
 import { Role } from '../../domain/entities';
@@ -20,6 +19,7 @@ const ALL_PERMISSIONS = [
     { id: 'manage_accounts', label: 'Manage Accounts', description: 'Can create, edit, and delete user accounts.' },
     { id: 'manage_roles', label: 'Manage Roles & Permissions', description: 'Can create roles and assign permissions.' },
     { id: 'manage_inventory', label: 'Manage Inventory', description: 'Can add, edit, and delete ingredients.' },
+    { id: 'manage_purchases', label: 'Manage Purchases', description: 'Can log new material purchases and view purchase history.' },
     { id: 'manage_conversions', label: 'Manage Conversions', description: 'Can manage unit conversion rules.' },
 ];
 
@@ -248,7 +248,7 @@ const RoleManagementPage: React.FC<RoleManagementPageProps> = ({ useCases }) => 
           </div>
           <button type="submit" disabled={isCreating || !newRoleName.trim()}
             className="px-6 py-2 bg-brand-primary hover:bg-brand-secondary text-white font-bold rounded-lg transition-colors duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2 h-10">
-            {isCreating ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : 'Create Role'}
+            {isCreating ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : 'Create Role'}
           </button>
         </form>
         {createError && <p className="text-red-400 text-sm text-center bg-red-500/10 p-3 rounded-md mt-4">{createError}</p>}

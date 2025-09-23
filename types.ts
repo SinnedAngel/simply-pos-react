@@ -79,6 +79,9 @@ export type RpcSaleReport = {
   avgOrderValue: number;
   dailySales: { date: string; total: number }[];
   topProducts: { name: string; quantity: number; price: number }[];
+  totalExpenses: number;
+  netProfit: number;
+  dailyExpenses: { date: string; total: number }[];
 };
 
 // Type for order items returned by the order log RPC
@@ -96,6 +99,20 @@ export type RpcOrderLogItem = {
   cashier_username: string | null;
   items: RpcOrderLogItemProduct[];
 };
+
+// Type for the result of the 'get_purchase_log' RPC
+export type RpcPurchaseLogItem = {
+    id: number;
+    created_at: string;
+    total_cost: number;
+    cashier_username: string | null;
+    ingredient_name: string;
+    quantity_purchased: number;
+    unit: string;
+    supplier: string | null;
+    notes: string | null;
+};
+
 
 // Type for open orders returned by the 'get_all_open_orders' RPC
 export type RpcOpenOrder = {
@@ -469,6 +486,57 @@ export interface Database {
           }
         ];
       };
+      purchase_log: {
+        Row: {
+          id: number;
+          created_at: string;
+          ingredient_id: number;
+          quantity_purchased: number;
+          unit: string;
+          total_cost: number;
+          user_id: string | null;
+          supplier: string | null;
+          notes: string | null;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          ingredient_id: number;
+          quantity_purchased: number;
+          unit: string;
+          total_cost: number;
+          user_id?: string | null;
+          supplier?: string | null;
+          notes?: string | null;
+        };
+        Update: {
+          id?: number;
+          created_at?: string;
+          ingredient_id?: number;
+          quantity_purchased?: number;
+          unit?: string;
+          total_cost?: number;
+          user_id?: string | null;
+          supplier?: string | null;
+          notes?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "purchase_log_ingredient_id_fkey";
+            columns: ["ingredient_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "purchase_log_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -496,7 +564,7 @@ export interface Database {
       };
       get_products_with_categories: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcProduct[];
       };
       set_product_categories: {
         Args: {
@@ -609,19 +677,19 @@ export interface Database {
           p_start_date: string;
           p_end_date: string;
         };
-        Returns: any;
+        Returns: RpcSaleReport;
       };
       get_order_log: {
         Args: {
           p_start_date: string;
           p_end_date: string;
         };
-        Returns: any;
+        Returns: RpcOrderLogItem[];
       };
       // Inventory & Conversion Functions
       get_all_ingredients: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcIngredient[];
       };
       create_ingredient: {
         Args: {
@@ -666,7 +734,7 @@ export interface Database {
       };
       get_all_conversions: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcConversion[];
       };
       create_conversion: {
         Args: {
@@ -696,7 +764,7 @@ export interface Database {
        // Open Order Functions
       get_all_open_orders: {
         Args: Record<string, unknown>;
-        Returns: any;
+        Returns: RpcOpenOrder[];
       };
       save_open_order: {
         Args: {
@@ -711,6 +779,27 @@ export interface Database {
           p_table_number: string;
         };
         Returns: void;
+      };
+      // Purchase Log Functions
+      log_purchase: {
+        Args: {
+          p_ingredient_id: number;
+          p_quantity: number;
+          p_unit: string;
+          p_total_cost: number;
+          p_user_id: string;
+          p_supplier?: string;
+          p_notes?: string;
+          p_created_at?: string;
+        };
+        Returns: void;
+      };
+      get_purchase_log: {
+        Args: {
+          p_end_date: string;
+          p_start_date: string;
+        };
+        Returns: RpcPurchaseLogItem[];
       };
     };
     Enums: {

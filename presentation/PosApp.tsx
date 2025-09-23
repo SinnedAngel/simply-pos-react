@@ -22,6 +22,7 @@ import { ShoppingCartIcon } from './components/icons/ShoppingCartIcon';
 import { XIcon } from './components/icons/XIcon';
 import OpenTablesBar from './components/OpenTablesBar';
 import SaveToTableModal from './components/SaveToTableModal';
+import PurchasingPage from './pages/PurchasingPage';
 
 interface PosAppProps {
   productUseCases: ProductUseCases;
@@ -34,7 +35,7 @@ interface PosAppProps {
   onSessionEnd: () => void;
 }
 
-type AppView = 'pos' | 'menu' | 'categories' | 'inventory' | 'conversions' | 'media' | 'accounts' | 'roles' | 'reporting';
+type AppView = 'pos' | 'menu' | 'categories' | 'inventory' | 'conversions' | 'media' | 'accounts' | 'roles' | 'reporting' | 'purchasing';
 type EditingProductState = Product | { mode: 'new'; defaults?: Partial<Omit<Product, 'id' | 'recipe' | 'categories'>> } | null;
 
 
@@ -268,6 +269,8 @@ function PosApp({ productUseCases, orderUseCases, authUseCases, mediaUseCases, s
         />;
       case 'conversions':
         return <ConversionManagementPage conversionUseCases={conversionUseCases} inventoryUseCases={inventoryUseCases} />;
+      case 'purchasing':
+        return <PurchasingPage salesUseCases={salesUseCases} inventoryUseCases={inventoryUseCases} session={session} />;
       case 'media':
         return <MediaLibraryPage useCases={mediaUseCases} />;
       case 'accounts':

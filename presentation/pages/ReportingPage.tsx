@@ -1,17 +1,18 @@
+
 import React, { useState } from 'react';
 import { SalesUseCases } from '../../domain/use-cases';
 import { useReporting } from '../hooks/useReporting';
 import LoadingSpinner from '../components/LoadingSpinner';
 import SalesChart from '../components/SalesChart';
-import { OrderLogItem } from '../../domain/entities';
+import { OrderLogItem, PurchaseLogItem } from '../../domain/entities';
 
 
 interface ReportingPageProps {
   useCases: SalesUseCases;
 }
 
-const StatCard: React.FC<{ title: string; value: string; }> = ({ title, value }) => (
-    <div className="bg-surface-card rounded-xl p-6 shadow-lg">
+const StatCard: React.FC<{ title: string; value: string; className?: string }> = ({ title, value, className = '' }) => (
+    <div className={`bg-surface-card rounded-xl p-6 shadow-lg ${className}`}>
         <p className="text-sm text-text-secondary font-medium">{title}</p>
         <p className="text-3xl font-bold text-text-primary mt-2">{value}</p>
     </div>
@@ -70,8 +71,51 @@ const OrderLogTable: React.FC<{ log: OrderLogItem[] | null }> = ({ log }) => {
     );
 };
 
+const PurchaseLogTable: React.FC<{ log: PurchaseLogItem[] | null }> = ({ log }) => {
+    if (!log || log.length === 0) {
+        return (
+            <div className="h-64 flex items-center justify-center">
+                <p className="text-text-secondary">No purchases found in this period.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="overflow-x-auto max-h-[500px]">
+            <table className="w-full text-left min-w-[800px]">
+                <thead className="bg-surface-main sticky top-0 z-10">
+                    <tr>
+                        <th className="p-3 font-semibold text-sm">Date</th>
+                        <th className="p-3 font-semibold text-sm">Ingredient</th>
+                        <th className="p-3 font-semibold text-sm text-right">Quantity</th>
+                        <th className="p-3 font-semibold text-sm">Supplier</th>
+                        <th className="p-3 font-semibold text-sm">Logged By</th>
+                        <th className="p-3 font-semibold text-sm text-right">Total Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {log.map(item => (
+                        <tr key={item.id} className="border-b border-surface-main last:border-b-0 hover:bg-surface-main/50 transition-colors">
+                            <td className="p-3 text-sm text-text-secondary whitespace-nowrap">
+                                {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </td>
+                            <td className="p-3 text-sm font-semibold text-text-primary">{item.ingredientName}</td>
+                            <td className="p-3 text-sm text-text-secondary text-right">{item.quantityPurchased.toLocaleString()} {item.unit}</td>
+                            <td className="p-3 text-sm text-text-secondary">{item.supplier || <span className="italic">N/A</span>}</td>
+                            <td className="p-3 text-sm text-text-secondary">{item.userName || <span className="italic">N/A</span>}</td>
+                            <td className="p-3 text-sm font-semibold text-text-primary text-right whitespace-nowrap">
+                                Rp {item.totalCost.toLocaleString('id-ID')}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
 const ReportingPage: React.FC<ReportingPageProps> = ({ useCases }) => {
-    const { report, orderLog, isLoading, error, fetchReport, activeFilter } = useReporting(useCases);
+    const { report, orderLog, purchaseLog, isLoading, error, fetchReport, activeFilter } = useReporting(useCases);
     const [startDate, setStartDate] = useState(toDateInputString(new Date()));
     const [endDate, setEndDate] = useState(toDateInputString(new Date()));
     const [customDateError, setCustomDateError] = useState('');
@@ -96,30 +140,39 @@ const ReportingPage: React.FC<ReportingPageProps> = ({ useCases }) => {
             return <p className="text-text-secondary text-center py-8">No data available for the selected period.</p>;
         }
 
+        const netProfitClass = report.netProfit >= 0 ? 'text-green-400' : 'text-red-400';
+
         return (
             <div className="space-y-8">
                 {/* Stat Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <StatCard title="Total Revenue" value={`Rp ${report.totalRevenue.toLocaleString('id-ID')}`} />
+                    <StatCard title="Total Expenses" value={`Rp ${report.totalExpenses.toLocaleString('id-ID')}`} />
+                     <StatCard title="Net Profit" value={`Rp ${report.netProfit.toLocaleString('id-ID')}`} className={netProfitClass} />
                     <StatCard title="Total Orders" value={report.orderCount.toLocaleString('id-ID')} />
-                    <StatCard title="Avg. Order Value" value={`Rp ${report.avgOrderValue.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`} />
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Sales Chart */}
-                    <div className="lg:col-span-2 bg-surface-card rounded-xl p-6 shadow-lg">
-                        <h3 className="text-lg font-semibold text-text-primary mb-4">Sales Over Time</h3>
-                        {report.dailySales.length > 0 ? (
-                            <SalesChart data={report.dailySales} />
+                    <div className="lg:col-span-3 bg-surface-card rounded-xl p-6 shadow-lg">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+                             <h3 className="text-lg font-semibold text-text-primary">Revenue vs. Expenses</h3>
+                             <div className="flex items-center gap-4 text-sm mt-2 sm:mt-0">
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-brand-secondary"></div><span>Revenue</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-red-500"></div><span>Expenses</span></div>
+                             </div>
+                        </div>
+                        {(report.dailySales.length > 0 || report.dailyExpenses.length > 0) ? (
+                            <SalesChart salesData={report.dailySales} expensesData={report.dailyExpenses} />
                         ) : (
                              <div className="h-64 flex items-center justify-center">
-                                <p className="text-text-secondary">No sales data to display for this period.</p>
+                                <p className="text-text-secondary">No financial data to display for this period.</p>
                             </div>
                         )}
                     </div>
 
                     {/* Top Selling Products */}
-                    <div className="bg-surface-card rounded-xl p-6 shadow-lg">
+                    <div className="lg:col-span-1 bg-surface-card rounded-xl p-6 shadow-lg">
                         <h3 className="text-lg font-semibold text-text-primary mb-4">Top Selling Products</h3>
                          {report.topProducts.length > 0 ? (
                             <ul className="space-y-3">
@@ -144,10 +197,16 @@ const ReportingPage: React.FC<ReportingPageProps> = ({ useCases }) => {
                          )}
                     </div>
 
-                    {/* New Order Log section */}
-                    <div className="bg-surface-card rounded-xl p-6 shadow-lg lg:col-span-3">
+                    {/* Order Log section */}
+                    <div className="bg-surface-card rounded-xl p-6 shadow-lg lg:col-span-2">
                         <h3 className="text-lg font-semibold text-text-primary mb-4">Order Log</h3>
                         <OrderLogTable log={orderLog} />
+                    </div>
+
+                    {/* New Purchase Log section */}
+                    <div className="lg:col-span-3 bg-surface-card rounded-xl p-6 shadow-lg">
+                        <h3 className="text-lg font-semibold text-text-primary mb-4">Purchase Log</h3>
+                        <PurchaseLogTable log={purchaseLog} />
                     </div>
                 </div>
             </div>

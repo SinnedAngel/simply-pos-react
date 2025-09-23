@@ -37,6 +37,16 @@ function App() {
     // After a successful login, we re-run initialization to transition to the main app.
     retryInitialization();
   };
+
+  const handleRetryAfterUpdate = () => {
+    // After a schema update, the user's permissions may have changed.
+    // The safest way to ensure they get the new permissions is to log them out,
+    // which clears the stale session from local storage, and have them log back in.
+    if (authUseCases) {
+      authUseCases.logout();
+    }
+    retryInitialization();
+  };
   
   const renderContent = () => {
      if (!supabaseClient) {
@@ -62,7 +72,7 @@ function App() {
         return <SchemaInitializationGuide onRetry={retryInitialization} />;
 
       case 'schema_update_required':
-        return <SchemaUpdateGuide onRetry={retryInitialization} />;
+        return <SchemaUpdateGuide onRetry={handleRetryAfterUpdate} />;
 
       case 'connection_error':
          return <ConnectionGuide errorDetail={error} onRetry={retryInitialization} />;

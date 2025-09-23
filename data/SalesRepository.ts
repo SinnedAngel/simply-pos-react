@@ -1,13 +1,27 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database, OrderItemParam, RpcOrderLogItem, RpcOpenOrder, RpcSaleReport } from '../types';
+import { Database, OrderItemParam, RpcOrderLogItem, RpcOpenOrder, RpcSaleReport, RpcPurchaseLogItem } from '../types';
 import { ISalesRepository } from '../domain/ports';
-import { Order, OrderLogItem, OpenOrder, SaleReport } from '../domain/entities';
+import { Order, OrderLogItem, OpenOrder, SaleReport, PurchaseLogItem } from '../domain/entities';
 
 // --- ADAPTER: Sales Repository ---
 // This class implements the ISalesRepository port. It adapts our data source (Supabase)
 // to the interface required by our application's sales and reporting use cases.
 export class SalesRepository implements ISalesRepository {
   constructor(private supabase: SupabaseClient<Database>) {}
+
+  private getErrorMessage(error: any, defaultMessage: string): string {
+    if (typeof error === 'object' && error !== null && error.message) {
+      let message = String(error.message);
+      if (error.details) {
+        message += ` Details: ${String(error.details)}`;
+      }
+      if (error.hint) {
+        message += ` Hint: ${String(error.hint)}`;
+      }
+      return message;
+    }
+    return defaultMessage;
+  }
 
   async createOrder(order: Order, userId: string): Promise<void> {
     const itemsToStore: OrderItemParam[] = order.items.map(item => ({
@@ -24,7 +38,7 @@ export class SalesRepository implements ISalesRepository {
 
     if (error) {
       console.error("Error creating order:", error);
-      throw new Error(`Failed to save order: ${error.message}`);
+      throw new Error(`Failed to save order: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
   }
 
@@ -36,7 +50,7 @@ export class SalesRepository implements ISalesRepository {
     
     if (error) {
         console.error("Error fetching sales report:", error);
-        throw new Error(`Failed to fetch sales report: ${error.message}`);
+        throw new Error(`Failed to fetch sales report: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
 
     if (!data) {
@@ -47,12 +61,13 @@ export class SalesRepository implements ISalesRepository {
             avgOrderValue: 0,
             dailySales: [],
             topProducts: [],
+            totalExpenses: 0,
+            netProfit: 0,
+            dailyExpenses: [],
         };
     }
     
-    // The RPC returns a JSONB object that matches the RpcSaleReport type.
-    // We cast it to ensure type safety.
-    const reportData = data as unknown as RpcSaleReport;
+    const reportData = data as RpcSaleReport;
 
     return {
         totalRevenue: reportData.totalRevenue || 0,
@@ -60,6 +75,9 @@ export class SalesRepository implements ISalesRepository {
         avgOrderValue: reportData.avgOrderValue || 0,
         dailySales: reportData.dailySales || [],
         topProducts: reportData.topProducts || [],
+        totalExpenses: reportData.totalExpenses || 0,
+        netProfit: reportData.netProfit || 0,
+        dailyExpenses: reportData.dailyExpenses || [],
     };
   }
 
@@ -71,12 +89,12 @@ export class SalesRepository implements ISalesRepository {
     
     if (error) {
         console.error("Error fetching order log:", error);
-        throw new Error(`Failed to fetch order log: ${error.message}`);
+        throw new Error(`Failed to fetch order log: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
 
     if (!data) return [];
 
-    const logData = data as unknown as RpcOrderLogItem[];
+    const logData = data as RpcOrderLogItem[];
 
     return logData.map(item => ({
         orderId: item.order_id,
@@ -91,16 +109,44 @@ export class SalesRepository implements ISalesRepository {
     }));
   }
 
+  async getPurchaseLog(startDate: string, endDate: string): Promise<PurchaseLogItem[]> {
+    const { data, error } = await this.supabase.rpc('get_purchase_log', {
+        p_start_date: startDate,
+        p_end_date: endDate,
+    });
+    
+    if (error) {
+        console.error("Error fetching purchase log:", error);
+        throw new Error(`Failed to fetch purchase log: ${this.getErrorMessage(error, 'Unknown error')}`);
+    }
+
+    if (!data) return [];
+
+    const logData = data as RpcPurchaseLogItem[];
+
+    return logData.map(item => ({
+        id: item.id,
+        createdAt: item.created_at,
+        totalCost: item.total_cost,
+        userName: item.cashier_username,
+        ingredientName: item.ingredient_name,
+        quantityPurchased: item.quantity_purchased,
+        unit: item.unit,
+        supplier: item.supplier,
+        notes: item.notes,
+    }));
+  }
+
   // --- Open Orders Methods ---
   async getOpenOrders(): Promise<OpenOrder[]> {
     const { data, error } = await this.supabase.rpc('get_all_open_orders');
     if (error) {
         console.error("Error fetching open orders:", error);
-        throw new Error(`Failed to fetch open orders: ${error.message}`);
+        throw new Error(`Failed to fetch open orders: ${this.getErrorMessage(error, 'Unknown error')}`);
     }
     if (!data) return [];
 
-    const openOrderData = data as unknown as RpcOpenOrder[];
+    const openOrderData = data as RpcOpenOrder[];
 
     return openOrderData.map(item => ({
         tableNumber: item.table_number,
@@ -117,7 +163,7 @@ export class SalesRepository implements ISalesRepository {
 
       if (error) {
           console.error("Error saving open order:", error);
-          throw new Error(`Failed to save order for table ${tableNumber}: ${error.message}`);
+          throw new Error(`Failed to save order for table ${tableNumber}: ${this.getErrorMessage(error, 'Unknown error')}`);
       }
   }
 
@@ -127,7 +173,7 @@ export class SalesRepository implements ISalesRepository {
       });
       if (error) {
           console.error("Error closing open order:", error);
-          throw new Error(`Failed to close order for table ${tableNumber}: ${error.message}`);
+          throw new Error(`Failed to close order for table ${tableNumber}: ${this.getErrorMessage(error, 'Unknown error')}`);
       }
   }
 }
